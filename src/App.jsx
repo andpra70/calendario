@@ -223,6 +223,7 @@ function getInitialState(currentYear) {
     fontFamily: fonts[0],
     selectedStyle: styleOptions[0].id,
     selectedLayout: layoutOptions[0].id,
+    showFoldGuide: true,
     accentColor: "#4f7cff",
     borderColor: "#d7ddea",
     surfaceColor: "#fff6ec",
@@ -242,6 +243,7 @@ function getInitialState(currentYear) {
       fontFamily: isValidOption(parsedState.fontFamily, fonts.map((font) => ({ id: font }))) ? parsedState.fontFamily : fallback.fontFamily,
       selectedStyle: isValidOption(parsedState.selectedStyle, styleOptions) ? parsedState.selectedStyle : fallback.selectedStyle,
       selectedLayout: isValidOption(parsedState.selectedLayout, layoutOptions) ? parsedState.selectedLayout : fallback.selectedLayout,
+      showFoldGuide: typeof parsedState.showFoldGuide === "boolean" ? parsedState.showFoldGuide : fallback.showFoldGuide,
       accentColor: typeof parsedState.accentColor === "string" ? parsedState.accentColor : fallback.accentColor,
       borderColor: typeof parsedState.borderColor === "string" ? parsedState.borderColor : fallback.borderColor,
       surfaceColor: typeof parsedState.surfaceColor === "string" ? parsedState.surfaceColor : fallback.surfaceColor,
@@ -352,6 +354,7 @@ export default function App() {
   const [fontFamily, setFontFamily] = useState(initialState.fontFamily);
   const [selectedStyle, setSelectedStyle] = useState(initialState.selectedStyle);
   const [selectedLayout, setSelectedLayout] = useState(initialState.selectedLayout);
+  const [showFoldGuide, setShowFoldGuide] = useState(initialState.showFoldGuide);
   const [accentColor, setAccentColor] = useState(initialState.accentColor);
   const [borderColor, setBorderColor] = useState(initialState.borderColor);
   const [surfaceColor, setSurfaceColor] = useState(initialState.surfaceColor);
@@ -445,6 +448,7 @@ export default function App() {
         fontFamily,
         selectedStyle,
         selectedLayout,
+        showFoldGuide,
         accentColor,
         borderColor,
         surfaceColor,
@@ -462,6 +466,7 @@ export default function App() {
     formatId,
     hasHydratedStorage,
     radiusScale,
+    showFoldGuide,
     selectedLayout,
     selectedStyle,
     surfaceColor,
@@ -631,6 +636,7 @@ export default function App() {
         fontFamily,
         selectedStyle,
         selectedLayout,
+        showFoldGuide,
         accentColor,
         borderColor,
         surfaceColor,
@@ -788,6 +794,14 @@ export default function App() {
                   onChange={(event) => setRadiusScale(Number(event.target.value))}
                 />
               </label>
+              <label className="toggle-inline">
+                <input
+                  type="checkbox"
+                  checked={showFoldGuide}
+                  onChange={(event) => setShowFoldGuide(event.target.checked)}
+                />
+                <span>Guida</span>
+              </label>
             </div>
           </div>
 
@@ -888,6 +902,7 @@ export default function App() {
                 fontFamily={fontFamily}
                 styleName={selectedStyleDef.className}
                 layoutName={selectedLayoutDef.id}
+                showFoldGuide={showFoldGuide}
               />
             ))}
           </div>
@@ -903,6 +918,7 @@ export default function App() {
             styleName={selectedStyleDef.className}
             layoutName={selectedLayoutDef.id}
             year={year}
+            showFoldGuide={showFoldGuide}
             borderColor={borderColor}
             surfaceColor={surfaceColor}
           />
@@ -912,7 +928,7 @@ export default function App() {
   );
 }
 
-function PrintSheetPreview({ month, fontFamily, styleName, layoutName }) {
+function PrintSheetPreview({ month, fontFamily, styleName, layoutName, showFoldGuide }) {
   const foldClass =
     layoutName === "vertical-split" || layoutName === "booklet-center"
       ? "sheet-preview__fold sheet-preview__fold--vertical"
@@ -958,12 +974,12 @@ function PrintSheetPreview({ month, fontFamily, styleName, layoutName }) {
         </div>
       </div>
 
-      <div className={foldClass}></div>
+      {showFoldGuide ? <div className={foldClass}></div> : null}
     </article>
   );
 }
 
-function ExportSheetPage({ month, fontFamily, styleName, layoutName, year, borderColor, surfaceColor }) {
+function ExportSheetPage({ month, fontFamily, styleName, layoutName, year, showFoldGuide, borderColor, surfaceColor }) {
   const foldClass =
     layoutName === "vertical-split" || layoutName === "booklet-center"
       ? "sheet-preview__fold sheet-preview__fold--vertical"
@@ -1015,7 +1031,7 @@ function ExportSheetPage({ month, fontFamily, styleName, layoutName, year, borde
 
       </div>
 
-      <div className={foldClass}></div>
+      {showFoldGuide ? <div className={foldClass}></div> : null}
     </article>
   );
 }

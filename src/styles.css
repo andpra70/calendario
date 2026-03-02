@@ -206,6 +206,22 @@ button {
   width: 64px;
 }
 
+.toggle-inline {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  margin-left: auto;
+  color: #435167;
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+.toggle-inline input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
 .font-picker {
   width: 100%;
   text-align: left;
