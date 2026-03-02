@@ -6,6 +6,8 @@ const STORAGE_KEY = "calendar-composer-state-v1";
 const IMAGE_DB_NAME = "calendar-composer-db";
 const IMAGE_STORE_NAME = "project_assets";
 const IMAGE_RECORD_KEY = "current_images";
+const PDF_CAPTURE_SCALE = 6;
+const PHOTO_CANVAS_SCALE = 3;
 
 const pageFormats = [
   { id: "A0", label: "A0", width: 841, height: 1189 },
@@ -68,6 +70,7 @@ const fonts = [
 ];
 
 const styleOptions = [
+  { id: 0, label: "Nessuno", className: "style-0", printClass: "print-style-0" },
   { id: 1, label: "Hero Edge", className: "style-1", printClass: "print-style-1" },
   { id: 2, label: "Band Frame", className: "style-2", printClass: "print-style-2" },
   { id: 3, label: "Caption Card", className: "style-3", printClass: "print-style-3" },
@@ -286,6 +289,7 @@ function getInitialState(currentYear) {
     monthBorderColor: "#d7ddea",
     dayBorderColor: "#c9d4ea",
     surfaceColor: "#fff6ec",
+    pageBackgroundColor: "#ffffff",
     radiusScale: 18,
     showMonthTextOnImage: true,
     showMonthTextOutline: true,
@@ -319,6 +323,8 @@ function getInitialState(currentYear) {
             : fallback.monthBorderColor,
       dayBorderColor: typeof parsedState.dayBorderColor === "string" ? parsedState.dayBorderColor : fallback.dayBorderColor,
       surfaceColor: typeof parsedState.surfaceColor === "string" ? parsedState.surfaceColor : fallback.surfaceColor,
+      pageBackgroundColor:
+        typeof parsedState.pageBackgroundColor === "string" ? parsedState.pageBackgroundColor : fallback.pageBackgroundColor,
       radiusScale: Number(parsedState.radiusScale) || fallback.radiusScale,
       showMonthTextOnImage:
         typeof parsedState.showMonthTextOnImage === "boolean"
@@ -396,6 +402,7 @@ function importProjectState(payload, currentYear) {
           : "#d7ddea",
     dayBorderColor: typeof settings.dayBorderColor === "string" ? settings.dayBorderColor : "#c9d4ea",
     surfaceColor: typeof settings.surfaceColor === "string" ? settings.surfaceColor : "#fff6ec",
+    pageBackgroundColor: typeof settings.pageBackgroundColor === "string" ? settings.pageBackgroundColor : "#ffffff",
     radiusScale: Number(settings.radiusScale) || 18,
     showMonthTextOnImage: typeof settings.showMonthTextOnImage === "boolean" ? settings.showMonthTextOnImage : true,
     showMonthTextOutline: typeof settings.showMonthTextOutline === "boolean" ? settings.showMonthTextOutline : true,
@@ -473,6 +480,8 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+const IMAGE_CANVAS_BLEED_PX = 4;
+
 export default function App() {
   const currentYear = new Date().getFullYear();
   const initialState = useMemo(() => getInitialState(currentYear), [currentYear]);
@@ -489,6 +498,7 @@ export default function App() {
   const [monthBorderColor, setMonthBorderColor] = useState(initialState.monthBorderColor);
   const [dayBorderColor, setDayBorderColor] = useState(initialState.dayBorderColor);
   const [surfaceColor, setSurfaceColor] = useState(initialState.surfaceColor);
+  const [pageBackgroundColor, setPageBackgroundColor] = useState(initialState.pageBackgroundColor);
   const [radiusScale, setRadiusScale] = useState(initialState.radiusScale);
   const [showMonthTextOnImage, setShowMonthTextOnImage] = useState(initialState.showMonthTextOnImage);
   const [showMonthTextOutline, setShowMonthTextOutline] = useState(initialState.showMonthTextOutline);
@@ -596,6 +606,7 @@ export default function App() {
         monthBorderColor,
         dayBorderColor,
         surfaceColor,
+        pageBackgroundColor,
         radiusScale,
         showMonthTextOnImage,
         showMonthTextOutline,
@@ -615,6 +626,7 @@ export default function App() {
     fontFamily,
     formatId,
     hasHydratedStorage,
+    pageBackgroundColor,
     monthTextColor,
     monthTextOutlineColor,
     monthImageAssignments,
@@ -657,6 +669,42 @@ export default function App() {
   const selectedLayoutDef = useMemo(
     () => layoutOptions.find((layout) => layout.id === selectedLayout) ?? layoutOptions[0],
     [selectedLayout]
+  );
+  const calendarThemeVars = useMemo(
+    () => ({
+      "--calendar-font": `'${fontFamily}', sans-serif`,
+      "--accent-color": normalizeHexColor(accentColor, "#4f7cff"),
+      "--accent-soft-10": mixColors(accentColor, "#ffffff", 0.1),
+      "--accent-soft-14": mixColors(accentColor, "#ffffff", 0.14),
+      "--accent-soft-18": mixColors(accentColor, "#ffffff", 0.18),
+      "--accent-soft-30": mixColors(accentColor, "#ffffff", 0.3),
+      "--accent-soft-35": mixColors(accentColor, "#ffcf94", 0.35),
+      "--accent-soft-45": mixColors(accentColor, "#ffffff", 0.45),
+      "--accent-dark-65": mixColors(accentColor, "#000000", 0.65),
+      "--day-cell-color": normalizeHexColor(dayCellColor, "#eef3ff"),
+      "--month-border-color": normalizeHexColor(monthBorderColor, "#d7ddea"),
+      "--day-border-color": normalizeHexColor(dayBorderColor, "#c9d4ea"),
+      "--day-border-soft": mixColors(dayBorderColor, "#ffffff", 0.7),
+      "--surface-color": normalizeHexColor(surfaceColor, "#fff6ec"),
+      "--surface-warm-88": mixColors(surfaceColor, "#f0e0c7", 0.88),
+      "--surface-light-92": mixColors(surfaceColor, "#ffffff", 0.92),
+      "--page-background-color": normalizeHexColor(pageBackgroundColor, "#ffffff"),
+      "--radius-scale": `${radiusScale}px`,
+      "--month-text-color": normalizeHexColor(monthTextColor, "#ffffff"),
+      "--month-text-outline-color": normalizeHexColor(monthTextOutlineColor, "#070c16")
+    }),
+    [
+      accentColor,
+      dayBorderColor,
+      dayCellColor,
+      fontFamily,
+      monthBorderColor,
+      monthTextColor,
+      monthTextOutlineColor,
+      pageBackgroundColor,
+      radiusScale,
+      surfaceColor
+    ]
   );
 
   const monthsData = useMemo(
@@ -776,10 +824,12 @@ export default function App() {
     await new Promise((resolve) => window.requestAnimationFrame(resolve));
 
     return html2canvas(pageNode, {
-      scale: 4,
+      scale: PDF_CAPTURE_SCALE,
       useCORS: true,
       backgroundColor: "#ffffff",
-      logging: false
+      logging: false,
+      scrollX: 0,
+      scrollY: 0
     });
   }
 
@@ -840,7 +890,7 @@ export default function App() {
         if (index > 0) {
           pdf.addPage([pageFormat.width, pageFormat.height], pageFormat.width > pageFormat.height ? "landscape" : "portrait");
         }
-        pdf.addImage(imageData, "PNG", 0, 0, pageFormat.width, pageFormat.height, undefined, "FAST");
+        pdf.addImage(imageData, "PNG", 0, 0, pageFormat.width, pageFormat.height);
       }
 
       setPdfProgress(96);
@@ -879,6 +929,7 @@ export default function App() {
         monthBorderColor,
         dayBorderColor,
         surfaceColor,
+        pageBackgroundColor,
         radiusScale,
         showMonthTextOnImage,
         showMonthTextOutline,
@@ -929,6 +980,7 @@ export default function App() {
       setMonthBorderColor(importedState.monthBorderColor);
       setDayBorderColor(importedState.dayBorderColor);
       setSurfaceColor(importedState.surfaceColor);
+      setPageBackgroundColor(importedState.pageBackgroundColor);
       setRadiusScale(importedState.radiusScale);
       setShowMonthTextOnImage(importedState.showMonthTextOnImage);
       setShowMonthTextOutline(importedState.showMonthTextOutline);
@@ -946,27 +998,7 @@ export default function App() {
   return (
     <div
       className="app-shell"
-      style={{
-        "--calendar-font": `'${fontFamily}', sans-serif`,
-        "--accent-color": normalizeHexColor(accentColor, "#4f7cff"),
-        "--accent-soft-10": mixColors(accentColor, "#ffffff", 0.1),
-        "--accent-soft-14": mixColors(accentColor, "#ffffff", 0.14),
-        "--accent-soft-18": mixColors(accentColor, "#ffffff", 0.18),
-        "--accent-soft-30": mixColors(accentColor, "#ffffff", 0.3),
-        "--accent-soft-35": mixColors(accentColor, "#ffcf94", 0.35),
-        "--accent-soft-45": mixColors(accentColor, "#ffffff", 0.45),
-        "--accent-dark-65": mixColors(accentColor, "#000000", 0.65),
-        "--day-cell-color": normalizeHexColor(dayCellColor, "#eef3ff"),
-        "--month-border-color": normalizeHexColor(monthBorderColor, "#d7ddea"),
-        "--day-border-color": normalizeHexColor(dayBorderColor, "#c9d4ea"),
-        "--day-border-soft": mixColors(dayBorderColor, "#ffffff", 0.7),
-        "--surface-color": normalizeHexColor(surfaceColor, "#fff6ec"),
-        "--surface-warm-88": mixColors(surfaceColor, "#f0e0c7", 0.88),
-        "--surface-light-92": mixColors(surfaceColor, "#ffffff", 0.92),
-        "--radius-scale": `${radiusScale}px`,
-        "--month-text-color": normalizeHexColor(monthTextColor, "#ffffff"),
-        "--month-text-outline-color": normalizeHexColor(monthTextOutlineColor, "#070c16")
-      }}
+      style={calendarThemeVars}
     >
       <header className="toolbar">
         <div className="toolbar__controls">
@@ -1049,15 +1081,11 @@ export default function App() {
           <div className="field field--theme">
             <span>Tema Calendario</span>
             <div className="theme-config">
-              <label className="theme-swatch">
-                <i style={{ backgroundColor: accentColor }}></i>
-                <input type="color" value={accentColor} onChange={(event) => setAccentColor(event.target.value)} />
-              </label>
-              <label className="theme-swatch">
+              <label className="theme-swatch" title="Sfondo celle giorno del calendario">
                 <i style={{ backgroundColor: dayCellColor }}></i>
                 <input type="color" value={dayCellColor} onChange={(event) => setDayCellColor(event.target.value)} />
               </label>
-              <label className="theme-swatch">
+              <label className="theme-swatch" title="Bordo del pannello mese con intestazione e griglia giorni">
                 <i style={{ backgroundColor: monthBorderColor }}></i>
                 <input
                   type="color"
@@ -1065,7 +1093,7 @@ export default function App() {
                   onChange={(event) => setMonthBorderColor(event.target.value)}
                 />
               </label>
-              <label className="theme-swatch">
+              <label className="theme-swatch" title="Bordo interno delle singole celle giorno">
                 <i style={{ backgroundColor: dayBorderColor }}></i>
                 <input
                   type="color"
@@ -1073,31 +1101,28 @@ export default function App() {
                   onChange={(event) => setDayBorderColor(event.target.value)}
                 />
               </label>
-              <label className="theme-swatch">
+              <label className="theme-swatch" title="Sfondo del pannello mese dietro intestazione e griglia">
                 <i style={{ backgroundColor: surfaceColor }}></i>
                 <input type="color" value={surfaceColor} onChange={(event) => setSurfaceColor(event.target.value)} />
               </label>
-              <label className="theme-swatch">
+              <label className="theme-swatch" title="Sfondo dell'intero pannello mese: contenitore completo della card mese">
+                <i style={{ backgroundColor: pageBackgroundColor }}></i>
+                <input
+                  type="color"
+                  value={pageBackgroundColor}
+                  onChange={(event) => setPageBackgroundColor(event.target.value)}
+                />
+              </label>
+              <label className="theme-swatch" title="Colore del nome del mese sopra l'immagine">
                 <i style={{ backgroundColor: monthTextColor }}></i>
                 <input type="color" value={monthTextColor} onChange={(event) => setMonthTextColor(event.target.value)} />
               </label>
-              <label className="theme-swatch">
+              <label className="theme-swatch" title="Colore dell'outline del nome del mese sopra l'immagine">
                 <i style={{ backgroundColor: monthTextOutlineColor }}></i>
                 <input
                   type="color"
                   value={monthTextOutlineColor}
                   onChange={(event) => setMonthTextOutlineColor(event.target.value)}
-                />
-              </label>
-              <label className="radius-control">
-                <span>{radiusScale}px</span>
-                <input
-                  type="range"
-                  min="0"
-                  max="36"
-                  step="1"
-                  value={radiusScale}
-                  onChange={(event) => setRadiusScale(Number(event.target.value))}
                 />
               </label>
               <label className="toggle-inline">
@@ -1271,6 +1296,12 @@ export default function App() {
                 showFoldGuide={showFoldGuide}
                 showMonthTextOnImage={showMonthTextOnImage}
                 showMonthTextOutline={showMonthTextOutline}
+                themeVars={calendarThemeVars}
+                isPreviewTarget={pdfPreviewMonthIndex === month.monthIndex}
+                onSelectMonth={(monthIndex) => {
+                  setPdfPreviewMonthIndex(monthIndex);
+                  setPdfPreviewImage("");
+                }}
                 onImageAdjust={updateMonthImageTransform}
                 onImageReset={resetMonthImageTransform}
                 onImageAssign={assignImageToMonth}
@@ -1317,6 +1348,9 @@ function PrintSheetPreview({
   showFoldGuide,
   showMonthTextOnImage,
   showMonthTextOutline,
+  themeVars,
+  isPreviewTarget,
+  onSelectMonth,
   onImageAdjust,
   onImageReset,
   onImageAssign,
@@ -1407,11 +1441,13 @@ function PrintSheetPreview({
 
     const cssWidth = Math.max(Math.round(viewportSize.width), 1);
     const cssHeight = Math.max(Math.round(viewportSize.height), 1);
-    const deviceScale = window.devicePixelRatio || 1;
-    canvas.width = Math.max(Math.round(cssWidth * deviceScale), 1);
-    canvas.height = Math.max(Math.round(cssHeight * deviceScale), 1);
-    canvas.style.width = `${cssWidth}px`;
-    canvas.style.height = `${cssHeight}px`;
+    const deviceScale = Math.max(window.devicePixelRatio || 1, PHOTO_CANVAS_SCALE);
+    const canvasCssWidth = cssWidth + IMAGE_CANVAS_BLEED_PX * 2;
+    const canvasCssHeight = cssHeight + IMAGE_CANVAS_BLEED_PX * 2;
+    canvas.width = Math.max(Math.round(canvasCssWidth * deviceScale), 1);
+    canvas.height = Math.max(Math.round(canvasCssHeight * deviceScale), 1);
+    canvas.style.width = `${canvasCssWidth}px`;
+    canvas.style.height = `${canvasCssHeight}px`;
 
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.clearRect(0, 0, canvas.width, canvas.height);
@@ -1437,7 +1473,6 @@ function PrintSheetPreview({
     const maxSourceY = Math.max(0, imageElement.naturalHeight - visibleSourceHeight);
     const sourceX = Math.min(maxSourceX, Math.max(0, ((month.imageTransform.x + 1) / 2) * maxSourceX));
     const sourceY = Math.min(maxSourceY, Math.max(0, ((month.imageTransform.y + 1) / 2) * maxSourceY));
-    const destinationBleedPx = 2;
 
     context.drawImage(
       imageElement,
@@ -1445,10 +1480,10 @@ function PrintSheetPreview({
       sourceY,
       visibleSourceWidth,
       visibleSourceHeight,
-      -destinationBleedPx,
-      -destinationBleedPx,
-      cssWidth + destinationBleedPx * 2,
-      cssHeight + destinationBleedPx * 2
+      0,
+      0,
+      canvasCssWidth,
+      canvasCssHeight
     );
   }, [
     baseHeightPx,
@@ -1555,10 +1590,16 @@ function PrintSheetPreview({
   return (
     <article
       ref={registerNode}
-      className={`sheet-preview ${styleName} layout-${layoutName}`}
+      className={
+        isPreviewTarget
+          ? `sheet-preview ${styleName} layout-${layoutName} is-preview-target`
+          : `sheet-preview ${styleName} layout-${layoutName}`
+      }
+      onClick={() => onSelectMonth(month.monthIndex)}
       style={{
         "--card-ratio": `${ratio}`,
-        "--month-font": `'${fontFamily}', sans-serif`
+        "--month-font": `'${fontFamily}', sans-serif`,
+        ...themeVars
       }}
     >
       <div
@@ -1598,22 +1639,40 @@ function PrintSheetPreview({
       </div>
 
       <div className="sheet-preview__calendar">
-        <div className="sheet-preview__calendar-header">
-          <strong>{month.label}</strong>
-        </div>
+        <div className="sheet-preview__calendar-surface">
+          <div className="sheet-preview__calendar-header">
+            <strong>{month.label}</strong>
+          </div>
 
-        <div className="weekday-row">
-          {weekdays.map((weekday) => (
-            <span key={weekday}>{weekday}</span>
-          ))}
-        </div>
+          <div className="weekday-row">
+            {weekdays.map((weekday, weekdayIndex) => (
+              <span
+                key={weekday}
+                className={weekdayIndex === 6 ? "weekday-cell weekday-cell--sunday" : "weekday-cell"}
+              >
+                {weekday}
+              </span>
+            ))}
+          </div>
 
-        <div className="day-grid">
-          {month.grid.map((day, index) => (
-            <span key={`${month.label}-${index}`} className={day ? "day-cell" : "day-cell day-cell--empty"}>
-              {day ?? ""}
-            </span>
-          ))}
+          <div className="day-grid">
+            {month.grid.map((day, index) => {
+              const isSunday = index % 7 === 6;
+              const className = day
+                ? isSunday
+                  ? "day-cell day-cell--sunday"
+                  : "day-cell"
+                : isSunday
+                  ? "day-cell day-cell--empty day-cell--sunday"
+                  : "day-cell day-cell--empty";
+
+              return (
+                <span key={`${month.label}-${index}`} className={className}>
+                  {day ?? ""}
+                </span>
+              );
+            })}
+          </div>
         </div>
       </div>
 
