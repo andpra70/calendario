@@ -116,13 +116,6 @@ const months = [
 
 const weekdays = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"];
 
-const starterImages = [
-  createPlaceholderImage("Aurora", "#607ddb", "#f5b76e"),
-  createPlaceholderImage("Atelier", "#1a936f", "#ffd166"),
-  createPlaceholderImage("Terra", "#bc4b51", "#f4a259"),
-  createPlaceholderImage("Ocean", "#0d3b66", "#7bdff2")
-];
-
 function buildMonthMatrix(year, monthIndex) {
   const firstDay = new Date(year, monthIndex, 1);
   const startShift = (firstDay.getDay() + 6) % 7;
@@ -135,25 +128,6 @@ function buildMonthMatrix(year, monthIndex) {
   }
 
   return cells;
-}
-
-function createPlaceholderImage(label, colorA, colorB) {
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900">
-      <defs>
-        <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="${colorA}" />
-          <stop offset="100%" stop-color="${colorB}" />
-        </linearGradient>
-      </defs>
-      <rect width="1200" height="900" fill="url(#g)" />
-      <circle cx="920" cy="210" r="140" fill="rgba(255,255,255,0.18)" />
-      <circle cx="260" cy="700" r="180" fill="rgba(255,255,255,0.16)" />
-      <text x="80" y="770" fill="white" font-size="132" font-family="Arial, sans-serif" font-weight="700">${label}</text>
-    </svg>
-  `;
-
-  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
 function toImageItem(src, name, isPreset = false) {
@@ -213,7 +187,7 @@ function isValidOption(value, options, key = "id") {
 }
 
 function getDefaultImages() {
-  return starterImages.map((src, index) => toImageItem(src, `Preset ${index + 1}`, true));
+  return [];
 }
 
 function getInitialState(currentYear) {
@@ -368,7 +342,7 @@ export default function App() {
   const [pdfProgress, setPdfProgress] = useState(0);
   const [pdfStatus, setPdfStatus] = useState("");
   const fontMenuRef = useRef(null);
-  const pdfRenderRef = useRef(null);
+  const previewRefs = useRef(new Map());
 
   useEffect(() => {
     const fontQuery = fonts.map((font) => `family=${font.replaceAll(" ", "+")}:wght@400;500;700`).join("&");
@@ -562,7 +536,7 @@ export default function App() {
   }
 
   async function handleExportPdf() {
-    if (!pdfRenderRef.current || isExportingPdf) {
+    if (isExportingPdf) {
       return;
     }
 
@@ -575,7 +549,10 @@ export default function App() {
         await document.fonts.ready;
       }
 
-      const pageNodes = Array.from(pdfRenderRef.current.querySelectorAll("[data-pdf-page='true']"));
+      const pageNodes = monthsData
+        .map((month) => previewRefs.current.get(month.label))
+        .filter(Boolean);
+
       if (pageNodes.length === 0) {
         throw new Error("Nessuna pagina disponibile per l'export.");
       }
@@ -596,17 +573,17 @@ export default function App() {
         await new Promise((resolve) => window.requestAnimationFrame(resolve));
 
         const canvas = await html2canvas(pageNode, {
-          scale: 2,
+          scale: 4,
           useCORS: true,
           backgroundColor: "#ffffff",
           logging: false
         });
 
-        const imageData = canvas.toDataURL("image/jpeg", 0.96);
+        const imageData = canvas.toDataURL("image/png");
         if (index > 0) {
           pdf.addPage([pageFormat.width, pageFormat.height], pageFormat.width > pageFormat.height ? "landscape" : "portrait");
         }
-        pdf.addImage(imageData, "JPEG", 0, 0, pageFormat.width, pageFormat.height, undefined, "FAST");
+        pdf.addImage(imageData, "PNG", 0, 0, pageFormat.width, pageFormat.height, undefined, "FAST");
       }
 
       setPdfProgress(96);
@@ -899,36 +876,29 @@ export default function App() {
               <PrintSheetPreview
                 key={month.label}
                 month={month}
+                format={pageFormat}
                 fontFamily={fontFamily}
                 styleName={selectedStyleDef.className}
                 layoutName={selectedLayoutDef.id}
                 showFoldGuide={showFoldGuide}
+                registerNode={(node) => {
+                  if (node) {
+                    previewRefs.current.set(month.label, node);
+                  } else {
+                    previewRefs.current.delete(month.label);
+                  }
+                }}
               />
             ))}
           </div>
         </section>
       </main>
-
-      <div className="pdf-render-root" ref={pdfRenderRef} aria-hidden="true">
-        {monthsData.map((month) => (
-          <ExportSheetPage
-            key={`pdf-${month.label}`}
-            month={month}
-            fontFamily={fontFamily}
-            styleName={selectedStyleDef.className}
-            layoutName={selectedLayoutDef.id}
-            year={year}
-            showFoldGuide={showFoldGuide}
-            borderColor={borderColor}
-            surfaceColor={surfaceColor}
-          />
-        ))}
-      </div>
     </div>
   );
 }
 
-function PrintSheetPreview({ month, fontFamily, styleName, layoutName, showFoldGuide }) {
+function PrintSheetPreview({ month, format, fontFamily, styleName, layoutName, showFoldGuide, registerNode }) {
+  const ratio = format.width / format.height;
   const foldClass =
     layoutName === "vertical-split" || layoutName === "booklet-center"
       ? "sheet-preview__fold sheet-preview__fold--vertical"
@@ -936,8 +906,10 @@ function PrintSheetPreview({ month, fontFamily, styleName, layoutName, showFoldG
 
   return (
     <article
+      ref={registerNode}
       className={`sheet-preview ${styleName} layout-${layoutName}`}
       style={{
+        "--card-ratio": `${ratio}`,
         "--month-font": `'${fontFamily}', sans-serif`
       }}
     >
@@ -972,63 +944,6 @@ function PrintSheetPreview({ month, fontFamily, styleName, layoutName, showFoldG
             </span>
           ))}
         </div>
-      </div>
-
-      {showFoldGuide ? <div className={foldClass}></div> : null}
-    </article>
-  );
-}
-
-function ExportSheetPage({ month, fontFamily, styleName, layoutName, year, showFoldGuide, borderColor, surfaceColor }) {
-  const foldClass =
-    layoutName === "vertical-split" || layoutName === "booklet-center"
-      ? "sheet-preview__fold sheet-preview__fold--vertical"
-      : "sheet-preview__fold sheet-preview__fold--horizontal";
-
-  return (
-    <article
-      data-pdf-page="true"
-      className={`sheet-preview sheet-preview--pdf ${styleName} layout-${layoutName}`}
-      style={{
-        "--month-font": `'${fontFamily}', sans-serif`,
-        "--pdf-border-color": borderColor,
-        "--pdf-surface-color": surfaceColor
-      }}
-    >
-      <div
-        className="sheet-preview__image"
-        style={{
-          backgroundImage: month.image
-            ? `linear-gradient(180deg, rgba(7, 12, 22, 0.08), rgba(7, 12, 22, 0.46)), url(${month.image.src})`
-            : undefined
-        }}
-      >
-        <div className="month-card__heading">
-          <h3>{month.label}</h3>
-        </div>
-      </div>
-
-      <div className="sheet-preview__calendar">
-        <div className="sheet-preview__calendar-header">
-          <strong>
-            {month.label} {year}
-          </strong>
-        </div>
-
-        <div className="weekday-row">
-          {weekdays.map((weekday) => (
-            <span key={`${month.label}-pdf-${weekday}`}>{weekday}</span>
-          ))}
-        </div>
-
-        <div className="day-grid">
-          {month.grid.map((day, index) => (
-            <span key={`${month.label}-pdf-${index}`} className={day ? "day-cell" : "day-cell day-cell--empty"}>
-              {day ?? ""}
-            </span>
-          ))}
-        </div>
-
       </div>
 
       {showFoldGuide ? <div className={foldClass}></div> : null}
