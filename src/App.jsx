@@ -191,23 +191,38 @@ function getDefaultImages() {
 }
 
 function getDefaultImageTransform() {
-  return { x: 50, y: 50, zoom: 1 };
+  return { x: 0, y: 0, zoom: 1 };
 }
 
-function sanitizeImageTransforms(value) {
+function sanitizeImageTransforms(value, mode = "viewport-v2") {
   if (!value || typeof value !== "object") {
     return {};
   }
 
   return Object.fromEntries(
-    Object.entries(value).map(([key, transform]) => [
-      key,
-      {
-        x: Number.isFinite(transform?.x) ? transform.x : 50,
-        y: Number.isFinite(transform?.y) ? transform.y : 50,
-        zoom: Number.isFinite(transform?.zoom) ? transform.zoom : 1
+    Object.entries(value).map(([key, transform]) => {
+      const rawX = Number.isFinite(transform?.x) ? transform.x : 0;
+      const rawY = Number.isFinite(transform?.y) ? transform.y : 0;
+      let nextX = rawX;
+      let nextY = rawY;
+
+      if (mode === "legacy-position-v0") {
+        nextX = (rawX - 50) / 50;
+        nextY = (rawY - 50) / 50;
+      } else if (mode === "translate-v1") {
+        nextX = rawX / 100;
+        nextY = rawY / 100;
       }
-    ])
+
+      return [
+        key,
+        {
+          x: Math.min(1, Math.max(-1, nextX)),
+          y: Math.min(1, Math.max(-1, nextY)),
+          zoom: Number.isFinite(transform?.zoom) ? transform.zoom : 1
+        }
+      ];
+    })
   );
 }
 
@@ -253,7 +268,7 @@ function getInitialState(currentYear) {
       selectedStyle: isValidOption(parsedState.selectedStyle, styleOptions) ? parsedState.selectedStyle : fallback.selectedStyle,
       selectedLayout: isValidOption(parsedState.selectedLayout, layoutOptions) ? parsedState.selectedLayout : fallback.selectedLayout,
       showFoldGuide: typeof parsedState.showFoldGuide === "boolean" ? parsedState.showFoldGuide : fallback.showFoldGuide,
-      monthImageTransforms: sanitizeImageTransforms(parsedState.monthImageTransforms),
+      monthImageTransforms: sanitizeImageTransforms(parsedState.monthImageTransforms, parsedState.imageTransformMode ?? "legacy-position-v0"),
       monthImageAssignments: sanitizeMonthImageAssignments(parsedState.monthImageAssignments),
       accentColor: typeof parsedState.accentColor === "string" ? parsedState.accentColor : fallback.accentColor,
       dayCellColor: typeof parsedState.dayCellColor === "string" ? parsedState.dayCellColor : fallback.dayCellColor,
@@ -317,7 +332,7 @@ function importProjectState(payload, currentYear) {
     selectedStyle: isValidOption(settings.selectedStyle, styleOptions) ? settings.selectedStyle : styleOptions[0].id,
     selectedLayout: isValidOption(settings.selectedLayout, layoutOptions) ? settings.selectedLayout : layoutOptions[0].id,
     showFoldGuide: typeof settings.showFoldGuide === "boolean" ? settings.showFoldGuide : true,
-    monthImageTransforms: sanitizeImageTransforms(settings.monthImageTransforms),
+    monthImageTransforms: sanitizeImageTransforms(settings.monthImageTransforms, settings.imageTransformMode ?? "legacy-position-v0"),
     monthImageAssignments: sanitizeMonthImageAssignments(settings.monthImageAssignments),
     accentColor: typeof settings.accentColor === "string" ? settings.accentColor : "#4f7cff",
     dayCellColor: typeof settings.dayCellColor === "string" ? settings.dayCellColor : "#eef3ff",
@@ -509,6 +524,7 @@ export default function App() {
         selectedStyle,
         selectedLayout,
         showFoldGuide,
+        imageTransformMode: "translate-v1",
         monthImageTransforms,
         monthImageAssignments,
         accentColor,
@@ -599,8 +615,8 @@ export default function App() {
       return {
         ...current,
         [monthIndex]: {
-          x: Math.min(100, Math.max(0, next.x)),
-          y: Math.min(100, Math.max(0, next.y)),
+          x: Math.min(1, Math.max(-1, next.x)),
+          y: Math.min(1, Math.max(-1, next.y)),
           zoom: Math.min(3, Math.max(1, next.zoom))
         }
       };
@@ -751,6 +767,7 @@ export default function App() {
         selectedStyle,
         selectedLayout,
         showFoldGuide,
+        imageTransformMode: "translate-v1",
         monthImageTransforms,
         monthImageAssignments,
         accentColor,
@@ -1247,8 +1264,9 @@ function PrintSheetPreview({
             aria-hidden="true"
             style={{
               backgroundImage: `url("${month.image.src}")`,
-              backgroundPosition: `${month.imageTransform.x}% ${month.imageTransform.y}%`,
-              transform: `scale(${month.imageTransform.zoom})`
+              "--image-pan-x": `${month.imageTransform.x}%`,
+              "--image-pan-y": `${month.imageTransform.y}%`,
+              transform: `translate(${month.imageTransform.x}%, ${month.imageTransform.y}%) scale(${month.imageTransform.zoom})`
             }}
           />
         ) : null}

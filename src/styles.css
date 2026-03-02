@@ -499,14 +499,15 @@ button {
 
 .sheet-preview__image-media {
   position: absolute;
-  inset: 0;
+  inset: -16%;
   pointer-events: none;
   background-repeat: no-repeat;
   background-size: cover;
+  background-position: center center;
   user-select: none;
   transform-origin: center center;
-  will-change: transform, object-position;
-  transition: transform 80ms linear, background-position 80ms linear;
+  will-change: transform;
+  transition: transform 80ms linear;
 }
 
 .sheet-preview__image-media.is-dragging {
