@@ -1,6 +1,7 @@
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import { useEffect, useMemo, useRef, useState } from "react";
+import exampleProjectData from "./assets/esempio.json";
 
 const STORAGE_KEY = "calendar-composer-state-v1";
 const IMAGE_DB_NAME = "calendar-composer-db";
@@ -519,6 +520,29 @@ export default function App() {
   const previewRefs = useRef(new Map());
   const importInputRef = useRef(null);
 
+  function applyImportedProject(importedState) {
+    setYear(importedState.year);
+    setFormatId(importedState.formatId);
+    setFontFamily(importedState.fontFamily);
+    setSelectedStyle(importedState.selectedStyle);
+    setSelectedLayout(importedState.selectedLayout);
+    setShowFoldGuide(importedState.showFoldGuide);
+    setMonthImageTransforms(importedState.monthImageTransforms);
+    setMonthImageAssignments(importedState.monthImageAssignments);
+    setAccentColor(importedState.accentColor);
+    setDayCellColor(importedState.dayCellColor);
+    setMonthBorderColor(importedState.monthBorderColor);
+    setDayBorderColor(importedState.dayBorderColor);
+    setSurfaceColor(importedState.surfaceColor);
+    setPageBackgroundColor(importedState.pageBackgroundColor);
+    setRadiusScale(importedState.radiusScale);
+    setShowMonthTextOnImage(importedState.showMonthTextOnImage);
+    setShowMonthTextOutline(importedState.showMonthTextOutline);
+    setMonthTextColor(importedState.monthTextColor);
+    setMonthTextOutlineColor(importedState.monthTextOutlineColor);
+    setImages(importedState.images);
+  }
+
   useEffect(() => {
     const fontQuery = fonts.map((font) => `family=${font.replaceAll(" ", "+")}:wght@400;500;700`).join("&");
     const link = document.createElement("link");
@@ -549,6 +573,7 @@ export default function App() {
 
     async function hydrateStorage() {
       try {
+        const hasStoredConfig = Boolean(localStorage.getItem(STORAGE_KEY));
         const storedImages = await loadImagesFromIndexedDb();
         if (isCancelled) {
           return;
@@ -561,12 +586,21 @@ export default function App() {
           if (legacyImages?.length) {
             setImages(legacyImages);
             await saveImagesToIndexedDb(legacyImages);
+          } else if (!hasStoredConfig) {
+            const exampleState = importProjectState(exampleProjectData, currentYear);
+            if (!isCancelled) {
+              applyImportedProject(exampleState);
+              await saveImagesToIndexedDb(exampleState.images);
+            }
           }
         }
       } catch {
         const legacyImages = getLegacyLocalImages();
         if (!isCancelled && legacyImages?.length) {
           setImages(legacyImages);
+        } else if (!isCancelled && !localStorage.getItem(STORAGE_KEY)) {
+          const exampleState = importProjectState(exampleProjectData, currentYear);
+          applyImportedProject(exampleState);
         }
         if (!isCancelled) {
           setStorageNotice("Persistenza immagini ridotta: IndexedDB non disponibile.");
@@ -966,27 +1000,7 @@ export default function App() {
       const raw = await file.text();
       const parsed = JSON.parse(raw);
       const importedState = importProjectState(parsed, currentYear);
-
-      setYear(importedState.year);
-      setFormatId(importedState.formatId);
-      setFontFamily(importedState.fontFamily);
-      setSelectedStyle(importedState.selectedStyle);
-      setSelectedLayout(importedState.selectedLayout);
-      setShowFoldGuide(importedState.showFoldGuide);
-      setMonthImageTransforms(importedState.monthImageTransforms);
-      setMonthImageAssignments(importedState.monthImageAssignments);
-      setAccentColor(importedState.accentColor);
-      setDayCellColor(importedState.dayCellColor);
-      setMonthBorderColor(importedState.monthBorderColor);
-      setDayBorderColor(importedState.dayBorderColor);
-      setSurfaceColor(importedState.surfaceColor);
-      setPageBackgroundColor(importedState.pageBackgroundColor);
-      setRadiusScale(importedState.radiusScale);
-      setShowMonthTextOnImage(importedState.showMonthTextOnImage);
-      setShowMonthTextOutline(importedState.showMonthTextOutline);
-      setMonthTextColor(importedState.monthTextColor);
-      setMonthTextOutlineColor(importedState.monthTextOutlineColor);
-      setImages(importedState.images);
+      applyImportedProject(importedState);
       setStorageNotice("");
     } catch {
       setStorageNotice("Import JSON non valido.");
