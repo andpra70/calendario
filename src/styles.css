@@ -504,7 +504,7 @@ button {
 }
 
 .sheet-preview.is-preview-target {
-  outline: 2px solid var(--accent-color);
+  outline: 2px solid var(--month-border-color);
   outline-offset: 2px;
 }
 
@@ -541,15 +541,13 @@ button {
   align-content: space-between;
   padding: 16px;
   color: #fff;
-  background:
-    linear-gradient(180deg, rgba(7, 12, 22, 0.06), rgba(7, 12, 22, 0.74)),
-    linear-gradient(135deg, var(--accent-color), var(--accent-soft-35));
+  background: transparent;
   cursor: grab;
   touch-action: none;
 }
 
 .sheet-preview__image.is-drop-target {
-  outline: 2px dashed var(--accent-color);
+  outline: 2px dashed var(--month-border-color);
   outline-offset: -8px;
 }
 
@@ -762,7 +760,7 @@ button {
 
 .style-7 .sheet-preview__calendar-surface {
   border: 1px solid var(--month-border-color);
-  border-left: 10px solid var(--accent-soft-18);
+  border-left: 10px solid var(--month-border-color);
 }
 
 .style-8 .sheet-preview__image::after {
