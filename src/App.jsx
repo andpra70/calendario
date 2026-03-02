@@ -190,6 +190,37 @@ function getDefaultImages() {
   return [];
 }
 
+function getDefaultImageTransform() {
+  return { x: 50, y: 50, zoom: 1 };
+}
+
+function sanitizeImageTransforms(value) {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, transform]) => [
+      key,
+      {
+        x: Number.isFinite(transform?.x) ? transform.x : 50,
+        y: Number.isFinite(transform?.y) ? transform.y : 50,
+        zoom: Number.isFinite(transform?.zoom) ? transform.zoom : 1
+      }
+    ])
+  );
+}
+
+function sanitizeMonthImageAssignments(value) {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).filter(([, imageId]) => typeof imageId === "string" && imageId.trim() !== "")
+  );
+}
+
 function getInitialState(currentYear) {
   const fallback = {
     year: currentYear,
@@ -198,8 +229,12 @@ function getInitialState(currentYear) {
     selectedStyle: styleOptions[0].id,
     selectedLayout: layoutOptions[0].id,
     showFoldGuide: true,
+    monthImageTransforms: {},
+    monthImageAssignments: {},
     accentColor: "#4f7cff",
-    borderColor: "#d7ddea",
+    dayCellColor: "#eef3ff",
+    monthBorderColor: "#d7ddea",
+    dayBorderColor: "#c9d4ea",
     surfaceColor: "#fff6ec",
     radiusScale: 18
   };
@@ -218,8 +253,17 @@ function getInitialState(currentYear) {
       selectedStyle: isValidOption(parsedState.selectedStyle, styleOptions) ? parsedState.selectedStyle : fallback.selectedStyle,
       selectedLayout: isValidOption(parsedState.selectedLayout, layoutOptions) ? parsedState.selectedLayout : fallback.selectedLayout,
       showFoldGuide: typeof parsedState.showFoldGuide === "boolean" ? parsedState.showFoldGuide : fallback.showFoldGuide,
+      monthImageTransforms: sanitizeImageTransforms(parsedState.monthImageTransforms),
+      monthImageAssignments: sanitizeMonthImageAssignments(parsedState.monthImageAssignments),
       accentColor: typeof parsedState.accentColor === "string" ? parsedState.accentColor : fallback.accentColor,
-      borderColor: typeof parsedState.borderColor === "string" ? parsedState.borderColor : fallback.borderColor,
+      dayCellColor: typeof parsedState.dayCellColor === "string" ? parsedState.dayCellColor : fallback.dayCellColor,
+      monthBorderColor:
+        typeof parsedState.monthBorderColor === "string"
+          ? parsedState.monthBorderColor
+          : typeof parsedState.borderColor === "string"
+            ? parsedState.borderColor
+            : fallback.monthBorderColor,
+      dayBorderColor: typeof parsedState.dayBorderColor === "string" ? parsedState.dayBorderColor : fallback.dayBorderColor,
       surfaceColor: typeof parsedState.surfaceColor === "string" ? parsedState.surfaceColor : fallback.surfaceColor,
       radiusScale: Number(parsedState.radiusScale) || fallback.radiusScale
     };
@@ -251,6 +295,43 @@ function getLegacyLocalImages() {
   } catch {
     return null;
   }
+}
+
+function importProjectState(payload, currentYear) {
+  const settings = payload?.settings ?? {};
+  const importedImages = Array.isArray(payload?.images)
+    ? payload.images
+        .filter((image) => typeof image?.src === "string" && typeof image?.name === "string")
+        .map((image) => ({
+          id: image.id || `${image.name}-${Math.random().toString(36).slice(2, 9)}`,
+          src: image.src,
+          name: image.name,
+          isPreset: Boolean(image.isPreset)
+        }))
+    : [];
+
+  return {
+    year: Number(settings.year) || currentYear,
+    formatId: isValidOption(settings.formatId, pageFormats) ? settings.formatId : "A4",
+    fontFamily: isValidOption(settings.fontFamily, fonts.map((font) => ({ id: font }))) ? settings.fontFamily : fonts[0],
+    selectedStyle: isValidOption(settings.selectedStyle, styleOptions) ? settings.selectedStyle : styleOptions[0].id,
+    selectedLayout: isValidOption(settings.selectedLayout, layoutOptions) ? settings.selectedLayout : layoutOptions[0].id,
+    showFoldGuide: typeof settings.showFoldGuide === "boolean" ? settings.showFoldGuide : true,
+    monthImageTransforms: sanitizeImageTransforms(settings.monthImageTransforms),
+    monthImageAssignments: sanitizeMonthImageAssignments(settings.monthImageAssignments),
+    accentColor: typeof settings.accentColor === "string" ? settings.accentColor : "#4f7cff",
+    dayCellColor: typeof settings.dayCellColor === "string" ? settings.dayCellColor : "#eef3ff",
+    monthBorderColor:
+      typeof settings.monthBorderColor === "string"
+        ? settings.monthBorderColor
+        : typeof settings.borderColor === "string"
+          ? settings.borderColor
+          : "#d7ddea",
+    dayBorderColor: typeof settings.dayBorderColor === "string" ? settings.dayBorderColor : "#c9d4ea",
+    surfaceColor: typeof settings.surfaceColor === "string" ? settings.surfaceColor : "#fff6ec",
+    radiusScale: Number(settings.radiusScale) || 18,
+    images: importedImages
+  };
 }
 
 function openImageDatabase() {
@@ -329,8 +410,12 @@ export default function App() {
   const [selectedStyle, setSelectedStyle] = useState(initialState.selectedStyle);
   const [selectedLayout, setSelectedLayout] = useState(initialState.selectedLayout);
   const [showFoldGuide, setShowFoldGuide] = useState(initialState.showFoldGuide);
+  const [monthImageTransforms, setMonthImageTransforms] = useState(initialState.monthImageTransforms);
+  const [monthImageAssignments, setMonthImageAssignments] = useState(initialState.monthImageAssignments);
   const [accentColor, setAccentColor] = useState(initialState.accentColor);
-  const [borderColor, setBorderColor] = useState(initialState.borderColor);
+  const [dayCellColor, setDayCellColor] = useState(initialState.dayCellColor);
+  const [monthBorderColor, setMonthBorderColor] = useState(initialState.monthBorderColor);
+  const [dayBorderColor, setDayBorderColor] = useState(initialState.dayBorderColor);
   const [surfaceColor, setSurfaceColor] = useState(initialState.surfaceColor);
   const [radiusScale, setRadiusScale] = useState(initialState.radiusScale);
   const [isDragActive, setIsDragActive] = useState(false);
@@ -343,6 +428,7 @@ export default function App() {
   const [pdfStatus, setPdfStatus] = useState("");
   const fontMenuRef = useRef(null);
   const previewRefs = useRef(new Map());
+  const importInputRef = useRef(null);
 
   useEffect(() => {
     const fontQuery = fonts.map((font) => `family=${font.replaceAll(" ", "+")}:wght@400;500;700`).join("&");
@@ -423,8 +509,12 @@ export default function App() {
         selectedStyle,
         selectedLayout,
         showFoldGuide,
+        monthImageTransforms,
+        monthImageAssignments,
         accentColor,
-        borderColor,
+        dayCellColor,
+        monthBorderColor,
+        dayBorderColor,
         surfaceColor,
         radiusScale
       };
@@ -435,10 +525,14 @@ export default function App() {
     }
   }, [
     accentColor,
-    borderColor,
+    dayCellColor,
+    monthBorderColor,
+    dayBorderColor,
     fontFamily,
     formatId,
     hasHydratedStorage,
+    monthImageAssignments,
+    monthImageTransforms,
     radiusScale,
     showFoldGuide,
     selectedLayout,
@@ -478,20 +572,59 @@ export default function App() {
   );
 
   const monthsData = useMemo(
-    () =>
-      months.map((label, monthIndex) => ({
-        monthIndex,
-        label,
-        grid: buildMonthMatrix(year, monthIndex),
-        image: images.length > 0 ? images[monthIndex % images.length] : null
-      })),
-    [images, year]
+    () => {
+      const imageMap = new Map(images.map((image) => [image.id, image]));
+
+      return months.map((label, monthIndex) => {
+        const assignedImageId = monthImageAssignments[monthIndex];
+        const assignedImage = assignedImageId ? imageMap.get(assignedImageId) ?? null : null;
+
+        return {
+          monthIndex,
+          label,
+          grid: buildMonthMatrix(year, monthIndex),
+          image: assignedImage ?? (images.length > 0 ? images[monthIndex % images.length] : null),
+          imageTransform: monthImageTransforms[monthIndex] ?? getDefaultImageTransform()
+        };
+      });
+    },
+    [images, monthImageAssignments, monthImageTransforms, year]
   );
+
+  function updateMonthImageTransform(monthIndex, updater) {
+    setMonthImageTransforms((current) => {
+      const base = current[monthIndex] ?? getDefaultImageTransform();
+      const next = typeof updater === "function" ? updater(base) : updater;
+
+      return {
+        ...current,
+        [monthIndex]: {
+          x: Math.min(100, Math.max(0, next.x)),
+          y: Math.min(100, Math.max(0, next.y)),
+          zoom: Math.min(3, Math.max(1, next.zoom))
+        }
+      };
+    });
+  }
+
+  function resetMonthImageTransform(monthIndex) {
+    setMonthImageTransforms((current) => ({
+      ...current,
+      [monthIndex]: getDefaultImageTransform()
+    }));
+  }
+
+  function assignImageToMonth(monthIndex, imageId) {
+    setMonthImageAssignments((current) => ({
+      ...current,
+      [monthIndex]: imageId
+    }));
+  }
 
   async function appendImages(files) {
     const imageFiles = Array.from(files ?? []).filter((file) => file.type.startsWith("image/"));
     if (imageFiles.length === 0) {
-      return;
+      return [];
     }
 
     const nextImages = await Promise.all(
@@ -499,6 +632,7 @@ export default function App() {
     );
 
     setImages((current) => [...current, ...nextImages]);
+    return nextImages;
   }
 
   async function handleImageUpload(event) {
@@ -533,6 +667,9 @@ export default function App() {
 
   function removeImage(imageId) {
     setImages((current) => current.filter((image) => image.id !== imageId));
+    setMonthImageAssignments((current) =>
+      Object.fromEntries(Object.entries(current).filter(([, assignedImageId]) => assignedImageId !== imageId))
+    );
   }
 
   async function handleExportPdf() {
@@ -614,8 +751,12 @@ export default function App() {
         selectedStyle,
         selectedLayout,
         showFoldGuide,
+        monthImageTransforms,
+        monthImageAssignments,
         accentColor,
-        borderColor,
+        dayCellColor,
+        monthBorderColor,
+        dayBorderColor,
         surfaceColor,
         radiusScale
       },
@@ -639,6 +780,40 @@ export default function App() {
     URL.revokeObjectURL(downloadUrl);
   }
 
+  async function handleImportJson(event) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    try {
+      const raw = await file.text();
+      const parsed = JSON.parse(raw);
+      const importedState = importProjectState(parsed, currentYear);
+
+      setYear(importedState.year);
+      setFormatId(importedState.formatId);
+      setFontFamily(importedState.fontFamily);
+      setSelectedStyle(importedState.selectedStyle);
+      setSelectedLayout(importedState.selectedLayout);
+      setShowFoldGuide(importedState.showFoldGuide);
+      setMonthImageTransforms(importedState.monthImageTransforms);
+      setMonthImageAssignments(importedState.monthImageAssignments);
+      setAccentColor(importedState.accentColor);
+      setDayCellColor(importedState.dayCellColor);
+      setMonthBorderColor(importedState.monthBorderColor);
+      setDayBorderColor(importedState.dayBorderColor);
+      setSurfaceColor(importedState.surfaceColor);
+      setRadiusScale(importedState.radiusScale);
+      setImages(importedState.images);
+      setStorageNotice("");
+    } catch {
+      setStorageNotice("Import JSON non valido.");
+    } finally {
+      event.target.value = "";
+    }
+  }
+
   return (
     <div
       className="app-shell"
@@ -652,8 +827,10 @@ export default function App() {
         "--accent-soft-35": mixColors(accentColor, "#ffcf94", 0.35),
         "--accent-soft-45": mixColors(accentColor, "#ffffff", 0.45),
         "--accent-dark-65": mixColors(accentColor, "#000000", 0.65),
-        "--border-color": normalizeHexColor(borderColor, "#d7ddea"),
-        "--border-soft-70": mixColors(borderColor, "#ffffff", 0.7),
+        "--day-cell-color": normalizeHexColor(dayCellColor, "#eef3ff"),
+        "--month-border-color": normalizeHexColor(monthBorderColor, "#d7ddea"),
+        "--day-border-color": normalizeHexColor(dayBorderColor, "#c9d4ea"),
+        "--day-border-soft": mixColors(dayBorderColor, "#ffffff", 0.7),
         "--surface-color": normalizeHexColor(surfaceColor, "#fff6ec"),
         "--surface-warm-88": mixColors(surfaceColor, "#f0e0c7", 0.88),
         "--surface-light-92": mixColors(surfaceColor, "#ffffff", 0.92),
@@ -661,15 +838,6 @@ export default function App() {
       }}
     >
       <header className="toolbar">
-        <div className="toolbar__brand">
-          <span className="toolbar__eyebrow">Calendar Composer</span>
-          <h1>Calendari illustrati annuali</h1>
-          <p className="toolbar__summary">
-            Layout di stampa pieghevoli, preview mensile e generazione PDF nel formato pagina selezionato.
-          </p>
-          {storageNotice ? <p className="toolbar__notice">{storageNotice}</p> : null}
-        </div>
-
         <div className="toolbar__controls">
           <label className="field">
             <span>Anno</span>
@@ -753,8 +921,24 @@ export default function App() {
                 <input type="color" value={accentColor} onChange={(event) => setAccentColor(event.target.value)} />
               </label>
               <label className="theme-swatch">
-                <i style={{ backgroundColor: borderColor }}></i>
-                <input type="color" value={borderColor} onChange={(event) => setBorderColor(event.target.value)} />
+                <i style={{ backgroundColor: dayCellColor }}></i>
+                <input type="color" value={dayCellColor} onChange={(event) => setDayCellColor(event.target.value)} />
+              </label>
+              <label className="theme-swatch">
+                <i style={{ backgroundColor: monthBorderColor }}></i>
+                <input
+                  type="color"
+                  value={monthBorderColor}
+                  onChange={(event) => setMonthBorderColor(event.target.value)}
+                />
+              </label>
+              <label className="theme-swatch">
+                <i style={{ backgroundColor: dayBorderColor }}></i>
+                <input
+                  type="color"
+                  value={dayBorderColor}
+                  onChange={(event) => setDayBorderColor(event.target.value)}
+                />
               </label>
               <label className="theme-swatch">
                 <i style={{ backgroundColor: surfaceColor }}></i>
@@ -782,28 +966,44 @@ export default function App() {
             </div>
           </div>
 
-          <div className="field field--wide field--actions">
-            <span>Output</span>
-            <div className="action-buttons">
-              <button type="button" className="export-button" onClick={handleExportPdf} disabled={isExportingPdf}>
-                {isExportingPdf ? "Esportazione PDF..." : "Esporta PDF"}
-              </button>
-              <button type="button" className="secondary-button" onClick={handleExportJson} disabled={isExportingPdf}>
-                Esporta JSON
-              </button>
-            </div>
-            {isExportingPdf ? (
-              <div className="progress-block" aria-live="polite">
-                <div className="progress-block__label">
-                  <strong>{pdfStatus || "Rendering PDF"}</strong>
-                  <span>{pdfProgress}%</span>
-                </div>
-                <div className="progress-block__track">
-                  <div className="progress-block__value" style={{ width: `${pdfProgress}%` }}></div>
-                </div>
-              </div>
-            ) : null}
+        </div>
+
+        {storageNotice ? <p className="toolbar__notice toolbar__notice--row">{storageNotice}</p> : null}
+        <div className="toolbar__actions">
+          <div className="action-buttons">
+            <button type="button" className="export-button" onClick={handleExportPdf} disabled={isExportingPdf}>
+              {isExportingPdf ? "Esportazione PDF..." : "Esporta PDF"}
+            </button>
+            <button type="button" className="secondary-button" onClick={handleExportJson} disabled={isExportingPdf}>
+              Esporta JSON
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => importInputRef.current?.click()}
+              disabled={isExportingPdf}
+            >
+              Importa JSON
+            </button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept="application/json"
+              className="visually-hidden"
+              onChange={handleImportJson}
+            />
           </div>
+          {isExportingPdf ? (
+            <div className="progress-block" aria-live="polite">
+              <div className="progress-block__label">
+                <strong>{pdfStatus || "Rendering PDF"}</strong>
+                <span>{pdfProgress}%</span>
+              </div>
+              <div className="progress-block__track">
+                <div className="progress-block__value" style={{ width: `${pdfProgress}%` }}></div>
+              </div>
+            </div>
+          ) : null}
         </div>
       </header>
 
@@ -838,7 +1038,15 @@ export default function App() {
 
           <div className="filmstrip__list">
             {images.map((image, index) => (
-              <article key={image.id} className="filmstrip-card">
+              <article
+                key={image.id}
+                className="filmstrip-card"
+                draggable="true"
+                onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = "copy";
+                  event.dataTransfer.setData("application/x-calendar-image-id", image.id);
+                }}
+              >
                 <button
                   type="button"
                   className="filmstrip-card__remove"
@@ -881,6 +1089,10 @@ export default function App() {
                 styleName={selectedStyleDef.className}
                 layoutName={selectedLayoutDef.id}
                 showFoldGuide={showFoldGuide}
+                onImageAdjust={updateMonthImageTransform}
+                onImageReset={resetMonthImageTransform}
+                onImageAssign={assignImageToMonth}
+                onImageUpload={appendImages}
                 registerNode={(node) => {
                   if (node) {
                     previewRefs.current.set(month.label, node);
@@ -897,12 +1109,108 @@ export default function App() {
   );
 }
 
-function PrintSheetPreview({ month, format, fontFamily, styleName, layoutName, showFoldGuide, registerNode }) {
+function PrintSheetPreview({
+  month,
+  format,
+  fontFamily,
+  styleName,
+  layoutName,
+  showFoldGuide,
+  onImageAdjust,
+  onImageReset,
+  onImageAssign,
+  onImageUpload,
+  registerNode
+}) {
   const ratio = format.width / format.height;
+  const dragStateRef = useRef(null);
+  const [isDraggingImage, setIsDraggingImage] = useState(false);
+  const [isDropTarget, setIsDropTarget] = useState(false);
   const foldClass =
     layoutName === "vertical-split" || layoutName === "booklet-center"
       ? "sheet-preview__fold sheet-preview__fold--vertical"
       : "sheet-preview__fold sheet-preview__fold--horizontal";
+
+  function stopImageDrag(event) {
+    if (dragStateRef.current?.pointerId === event.pointerId) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+      dragStateRef.current = null;
+      setIsDraggingImage(false);
+    }
+  }
+
+  function handleImagePointerDown(event) {
+    if (!month.image || event.button !== 0) {
+      return;
+    }
+
+    const mode = event.altKey ? "zoom" : event.shiftKey ? "pan" : null;
+    if (!mode) {
+      return;
+    }
+
+    event.preventDefault();
+    dragStateRef.current = {
+      mode,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startTransform: month.imageTransform
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setIsDraggingImage(true);
+  }
+
+  function handleImagePointerMove(event) {
+    const dragState = dragStateRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const deltaX = ((event.clientX - dragState.startX) / bounds.width) * 100;
+    const deltaY = ((event.clientY - dragState.startY) / bounds.height) * 100;
+
+    if (dragState.mode === "pan") {
+      onImageAdjust(month.monthIndex, (current) => ({
+        ...current,
+        x: dragState.startTransform.x + deltaX,
+        y: dragState.startTransform.y + deltaY
+      }));
+      return;
+    }
+
+    if (dragState.mode === "zoom") {
+      const zoomDelta = ((event.clientX - dragState.startX) / bounds.width) * 2;
+      onImageAdjust(month.monthIndex, (current) => ({
+        ...current,
+        zoom: dragState.startTransform.zoom + zoomDelta
+      }));
+    }
+  }
+
+  async function handleImageDrop(event) {
+    event.preventDefault();
+    setIsDropTarget(false);
+
+    const draggedImageId = event.dataTransfer.getData("application/x-calendar-image-id");
+    if (draggedImageId) {
+      onImageAssign(month.monthIndex, draggedImageId);
+      resetMonthImageTransform(month.monthIndex);
+      return;
+    }
+
+    const imageFiles = Array.from(event.dataTransfer.files ?? []).filter((file) => file.type.startsWith("image/"));
+    if (imageFiles.length === 0) {
+      return;
+    }
+
+    const nextImages = await onImageUpload(imageFiles);
+    if (nextImages[0]) {
+      onImageAssign(month.monthIndex, nextImages[0].id);
+      resetMonthImageTransform(month.monthIndex);
+    }
+  }
 
   return (
     <article
@@ -914,13 +1222,36 @@ function PrintSheetPreview({ month, format, fontFamily, styleName, layoutName, s
       }}
     >
       <div
-        className="sheet-preview__image"
-        style={{
-          backgroundImage: month.image
-            ? `linear-gradient(180deg, rgba(7, 12, 22, 0.08), rgba(7, 12, 22, 0.46)), url(${month.image.src})`
-            : undefined
+        className={isDropTarget ? "sheet-preview__image is-drop-target" : "sheet-preview__image"}
+        onPointerDown={handleImagePointerDown}
+        onPointerMove={handleImagePointerMove}
+        onPointerUp={stopImageDrag}
+        onPointerCancel={stopImageDrag}
+        onDoubleClick={() => onImageReset(month.monthIndex)}
+        onDragOver={(event) => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+          setIsDropTarget(true);
         }}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) {
+            setIsDropTarget(false);
+          }
+        }}
+        onDrop={handleImageDrop}
+        title="Shift + drag per pan, Alt + drag per zoom, doppio click per reset, drop immagine per sostituire"
       >
+        {month.image ? (
+          <div
+            className={isDraggingImage ? "sheet-preview__image-media is-dragging" : "sheet-preview__image-media"}
+            aria-hidden="true"
+            style={{
+              backgroundImage: `url("${month.image.src}")`,
+              backgroundPosition: `${month.imageTransform.x}% ${month.imageTransform.y}%`,
+              transform: `scale(${month.imageTransform.zoom})`
+            }}
+          />
+        ) : null}
         <div className="month-card__heading">
           <h3>{month.label}</h3>
         </div>
