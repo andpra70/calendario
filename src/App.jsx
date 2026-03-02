@@ -500,8 +500,11 @@ export default function App() {
   const [storageNotice, setStorageNotice] = useState("");
   const [hasHydratedStorage, setHasHydratedStorage] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [isPreviewingPdfMonth, setIsPreviewingPdfMonth] = useState(false);
   const [pdfProgress, setPdfProgress] = useState(0);
   const [pdfStatus, setPdfStatus] = useState("");
+  const [pdfPreviewMonthIndex, setPdfPreviewMonthIndex] = useState(new Date().getMonth());
+  const [pdfPreviewImage, setPdfPreviewImage] = useState("");
   const fontMenuRef = useRef(null);
   const previewRefs = useRef(new Map());
   const importInputRef = useRef(null);
@@ -757,6 +760,46 @@ export default function App() {
     );
   }
 
+  async function captureMonthPreview(monthIndex) {
+    if (document.fonts?.ready) {
+      await document.fonts.ready;
+    }
+
+    const month = monthsData[monthIndex];
+    const pageNode = month ? previewRefs.current.get(month.label) : null;
+    if (!pageNode) {
+      throw new Error("Pagina mese non disponibile per la preview.");
+    }
+
+    await new Promise((resolve) => window.requestAnimationFrame(resolve));
+    await waitForNodeImages(pageNode);
+    await new Promise((resolve) => window.requestAnimationFrame(resolve));
+
+    return html2canvas(pageNode, {
+      scale: 4,
+      useCORS: true,
+      backgroundColor: "#ffffff",
+      logging: false
+    });
+  }
+
+  async function handlePreviewPdfMonth() {
+    if (isPreviewingPdfMonth || isExportingPdf) {
+      return;
+    }
+
+    try {
+      setIsPreviewingPdfMonth(true);
+      const canvas = await captureMonthPreview(pdfPreviewMonthIndex);
+      setPdfPreviewImage(canvas.toDataURL("image/png"));
+    } catch (error) {
+      console.error(error);
+      setStorageNotice("Anteprima PDF mese non disponibile.");
+    } finally {
+      setIsPreviewingPdfMonth(false);
+    }
+  }
+
   async function handleExportPdf() {
     if (isExportingPdf) {
       return;
@@ -791,17 +834,7 @@ export default function App() {
         setPdfStatus(`Rendering mese ${index + 1} di ${pageNodes.length}`);
         setPdfProgress(Math.round((index / pageNodes.length) * 85) + 5);
 
-        // Let React flush the progress state before heavy rendering.
-        await new Promise((resolve) => window.requestAnimationFrame(resolve));
-        await waitForNodeImages(pageNode);
-        await new Promise((resolve) => window.requestAnimationFrame(resolve));
-
-        const canvas = await html2canvas(pageNode, {
-          scale: 4,
-          useCORS: true,
-          backgroundColor: "#ffffff",
-          logging: false
-        });
+        const canvas = await captureMonthPreview(index);
 
         const imageData = canvas.toDataURL("image/png");
         if (index > 0) {
@@ -1098,6 +1131,26 @@ export default function App() {
         {storageNotice ? <p className="toolbar__notice toolbar__notice--row">{storageNotice}</p> : null}
         <div className="toolbar__actions">
           <div className="action-buttons">
+            <select
+              className="secondary-select"
+              value={pdfPreviewMonthIndex}
+              onChange={(event) => setPdfPreviewMonthIndex(Number(event.target.value))}
+              disabled={isExportingPdf || isPreviewingPdfMonth}
+            >
+              {months.map((monthLabel, monthIndex) => (
+                <option key={monthLabel} value={monthIndex}>
+                  Preview {monthLabel}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={handlePreviewPdfMonth}
+              disabled={isExportingPdf || isPreviewingPdfMonth}
+            >
+              {isPreviewingPdfMonth ? "Preview..." : "Preview PDF Mese"}
+            </button>
             <button type="button" className="export-button" onClick={handleExportPdf} disabled={isExportingPdf}>
               {isExportingPdf ? "Esportazione PDF..." : "Esporta PDF"}
             </button>
@@ -1234,6 +1287,23 @@ export default function App() {
           </div>
         </section>
       </main>
+
+      {pdfPreviewImage ? (
+        <div className="pdf-preview-modal" role="dialog" aria-modal="true" aria-label="Anteprima PDF mese">
+          <div className="pdf-preview-modal__backdrop" onClick={() => setPdfPreviewImage("")}></div>
+          <div className="pdf-preview-modal__panel">
+            <div className="pdf-preview-modal__header">
+              <strong>{months[pdfPreviewMonthIndex]}</strong>
+              <button type="button" className="pdf-preview-modal__close" onClick={() => setPdfPreviewImage("")}>
+                Chiudi
+              </button>
+            </div>
+            <div className="pdf-preview-modal__content">
+              <img src={pdfPreviewImage} alt={`Anteprima PDF ${months[pdfPreviewMonthIndex]}`} />
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1354,21 +1424,31 @@ function PrintSheetPreview({
     context.imageSmoothingQuality = "high";
     context.scale(deviceScale, deviceScale);
 
-    const sourceWidth = Math.min(imageElement.naturalWidth, viewportSize.width / (baseWidthPx / imageElement.naturalWidth) / month.imageTransform.zoom);
-    const sourceHeight = Math.min(imageElement.naturalHeight, viewportSize.height / (baseHeightPx / imageElement.naturalHeight) / month.imageTransform.zoom);
-    const sourceX = ((imageElement.naturalWidth - sourceWidth) / 2) * (1 - month.imageTransform.x);
-    const sourceY = ((imageElement.naturalHeight - sourceHeight) / 2) * (1 - month.imageTransform.y);
+    const scaleToCover = Math.max(viewportSize.width / imageElement.naturalWidth, viewportSize.height / imageElement.naturalHeight);
+    const visibleSourceWidth = Math.min(
+      imageElement.naturalWidth,
+      viewportSize.width / (scaleToCover * month.imageTransform.zoom)
+    );
+    const visibleSourceHeight = Math.min(
+      imageElement.naturalHeight,
+      viewportSize.height / (scaleToCover * month.imageTransform.zoom)
+    );
+    const maxSourceX = Math.max(0, imageElement.naturalWidth - visibleSourceWidth);
+    const maxSourceY = Math.max(0, imageElement.naturalHeight - visibleSourceHeight);
+    const sourceX = Math.min(maxSourceX, Math.max(0, ((month.imageTransform.x + 1) / 2) * maxSourceX));
+    const sourceY = Math.min(maxSourceY, Math.max(0, ((month.imageTransform.y + 1) / 2) * maxSourceY));
+    const destinationBleedPx = 2;
 
     context.drawImage(
       imageElement,
       sourceX,
       sourceY,
-      sourceWidth,
-      sourceHeight,
-      0,
-      0,
-      cssWidth,
-      cssHeight
+      visibleSourceWidth,
+      visibleSourceHeight,
+      -destinationBleedPx,
+      -destinationBleedPx,
+      cssWidth + destinationBleedPx * 2,
+      cssHeight + destinationBleedPx * 2
     );
   }, [
     baseHeightPx,
