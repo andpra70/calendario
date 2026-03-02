@@ -497,21 +497,29 @@ button {
   outline-offset: -8px;
 }
 
-.sheet-preview__image-media {
+.sheet-preview__image-stage {
   position: absolute;
-  inset: -16%;
+  overflow: hidden;
   pointer-events: none;
-  background-repeat: no-repeat;
-  background-size: cover;
-  background-position: center center;
   user-select: none;
-  transform-origin: center center;
-  will-change: transform;
-  transition: transform 80ms linear;
+  will-change: left, top, width, height;
+  transition:
+    left 80ms linear,
+    top 80ms linear,
+    width 80ms linear,
+    height 80ms linear;
 }
 
-.sheet-preview__image-media.is-dragging {
+.sheet-preview__image-stage.is-dragging {
   transition: none;
+}
+
+.sheet-preview__image-media {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
 }
 
 .sheet-preview__calendar {
@@ -571,6 +579,16 @@ button {
   margin: 0;
   font-size: clamp(1.7rem, 2vw, 2.4rem);
   line-height: 0.95;
+  color: #ffffff;
+  text-shadow:
+    -1px 0 0 rgba(7, 12, 22, 0.9),
+    1px 0 0 rgba(7, 12, 22, 0.9),
+    0 -1px 0 rgba(7, 12, 22, 0.9),
+    0 1px 0 rgba(7, 12, 22, 0.9),
+    -1px -1px 0 rgba(7, 12, 22, 0.72),
+    1px -1px 0 rgba(7, 12, 22, 0.72),
+    -1px 1px 0 rgba(7, 12, 22, 0.72),
+    1px 1px 0 rgba(7, 12, 22, 0.72);
 }
 
 .weekday-row,

@@ -14,6 +14,8 @@ const pageFormats = [
   { id: "A3", label: "A3", width: 297, height: 420 },
   { id: "A4", label: "A4", width: 210, height: 297 },
   { id: "A5", label: "A5", width: 148, height: 210 },
+  { id: "A6", label: "A6", width: 105, height: 148 },
+  { id: "A7", label: "A7", width: 74, height: 105 },
   { id: "B0", label: "B0", width: 1000, height: 1414 },
   { id: "B1", label: "B1", width: 707, height: 1000 },
   { id: "B2", label: "B2", width: 500, height: 707 },
@@ -524,7 +526,7 @@ export default function App() {
         selectedStyle,
         selectedLayout,
         showFoldGuide,
-        imageTransformMode: "translate-v1",
+        imageTransformMode: "viewport-v2",
         monthImageTransforms,
         monthImageAssignments,
         accentColor,
@@ -767,7 +769,7 @@ export default function App() {
         selectedStyle,
         selectedLayout,
         showFoldGuide,
-        imageTransformMode: "translate-v1",
+        imageTransformMode: "viewport-v2",
         monthImageTransforms,
         monthImageAssignments,
         accentColor,
@@ -1141,12 +1143,40 @@ function PrintSheetPreview({
 }) {
   const ratio = format.width / format.height;
   const dragStateRef = useRef(null);
+  const imageViewportRef = useRef(null);
   const [isDraggingImage, setIsDraggingImage] = useState(false);
   const [isDropTarget, setIsDropTarget] = useState(false);
+  const [imageRatio, setImageRatio] = useState(1);
   const foldClass =
     layoutName === "vertical-split" || layoutName === "booklet-center"
       ? "sheet-preview__fold sheet-preview__fold--vertical"
       : "sheet-preview__fold sheet-preview__fold--horizontal";
+
+  useEffect(() => {
+    if (!month.image?.src) {
+      setImageRatio(1);
+      return;
+    }
+
+    const nextImage = new Image();
+    nextImage.onload = () => {
+      if (nextImage.naturalWidth > 0 && nextImage.naturalHeight > 0) {
+        setImageRatio(nextImage.naturalWidth / nextImage.naturalHeight);
+      }
+    };
+    nextImage.src = month.image.src;
+  }, [month.image?.src]);
+
+  const viewportRatio =
+    layoutName === "vertical-split" || layoutName === "booklet-center" ? ratio / 2 : ratio;
+  const baseWidth = imageRatio > viewportRatio ? (imageRatio / viewportRatio) * 100 : 100;
+  const baseHeight = imageRatio > viewportRatio ? 100 : (viewportRatio / imageRatio) * 100;
+  const scaledWidth = baseWidth * month.imageTransform.zoom;
+  const scaledHeight = baseHeight * month.imageTransform.zoom;
+  const maxPanX = Math.max(0, (scaledWidth - 100) / 2);
+  const maxPanY = Math.max(0, (scaledHeight - 100) / 2);
+  const imageLeft = 50 - scaledWidth / 2 + month.imageTransform.x * maxPanX;
+  const imageTop = 50 - scaledHeight / 2 + month.imageTransform.y * maxPanY;
 
   function stopImageDrag(event) {
     if (dragStateRef.current?.pointerId === event.pointerId) {
@@ -1167,12 +1197,17 @@ function PrintSheetPreview({
     }
 
     event.preventDefault();
+    const bounds = imageViewportRef.current?.getBoundingClientRect();
     dragStateRef.current = {
       mode,
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
-      startTransform: month.imageTransform
+      startTransform: month.imageTransform,
+      viewportWidth: bounds?.width ?? 1,
+      viewportHeight: bounds?.height ?? 1,
+      maxPanX,
+      maxPanY
     };
     event.currentTarget.setPointerCapture?.(event.pointerId);
     setIsDraggingImage(true);
@@ -1184,21 +1219,26 @@ function PrintSheetPreview({
       return;
     }
 
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const deltaX = ((event.clientX - dragState.startX) / bounds.width) * 100;
-    const deltaY = ((event.clientY - dragState.startY) / bounds.height) * 100;
+    const deltaX = event.clientX - dragState.startX;
+    const deltaY = event.clientY - dragState.startY;
 
     if (dragState.mode === "pan") {
       onImageAdjust(month.monthIndex, (current) => ({
         ...current,
-        x: dragState.startTransform.x + deltaX,
-        y: dragState.startTransform.y + deltaY
+        x:
+          dragState.maxPanX > 0
+            ? dragState.startTransform.x + deltaX / ((dragState.maxPanX / 100) * dragState.viewportWidth)
+            : 0,
+        y:
+          dragState.maxPanY > 0
+            ? dragState.startTransform.y + deltaY / ((dragState.maxPanY / 100) * dragState.viewportHeight)
+            : 0
       }));
       return;
     }
 
     if (dragState.mode === "zoom") {
-      const zoomDelta = ((event.clientX - dragState.startX) / bounds.width) * 2;
+      const zoomDelta = (deltaX / dragState.viewportWidth) * 2;
       onImageAdjust(month.monthIndex, (current) => ({
         ...current,
         zoom: dragState.startTransform.zoom + zoomDelta
@@ -1239,6 +1279,7 @@ function PrintSheetPreview({
       }}
     >
       <div
+        ref={imageViewportRef}
         className={isDropTarget ? "sheet-preview__image is-drop-target" : "sheet-preview__image"}
         onPointerDown={handleImagePointerDown}
         onPointerMove={handleImagePointerMove}
@@ -1260,15 +1301,21 @@ function PrintSheetPreview({
       >
         {month.image ? (
           <div
-            className={isDraggingImage ? "sheet-preview__image-media is-dragging" : "sheet-preview__image-media"}
-            aria-hidden="true"
+            className={isDraggingImage ? "sheet-preview__image-stage is-dragging" : "sheet-preview__image-stage"}
             style={{
-              backgroundImage: `url("${month.image.src}")`,
-              "--image-pan-x": `${month.imageTransform.x}%`,
-              "--image-pan-y": `${month.imageTransform.y}%`,
-              transform: `translate(${month.imageTransform.x}%, ${month.imageTransform.y}%) scale(${month.imageTransform.zoom})`
+              width: `${scaledWidth}%`,
+              height: `${scaledHeight}%`,
+              left: `${imageLeft}%`,
+              top: `${imageTop}%`
             }}
-          />
+          >
+            <img
+              className="sheet-preview__image-media"
+              src={month.image.src}
+              alt=""
+              draggable="false"
+            />
+          </div>
         ) : null}
         <div className="month-card__heading">
           <h3>{month.label}</h3>
