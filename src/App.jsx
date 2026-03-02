@@ -286,7 +286,11 @@ function getInitialState(currentYear) {
     monthBorderColor: "#d7ddea",
     dayBorderColor: "#c9d4ea",
     surfaceColor: "#fff6ec",
-    radiusScale: 18
+    radiusScale: 18,
+    showMonthTextOnImage: true,
+    showMonthTextOutline: true,
+    monthTextColor: "#ffffff",
+    monthTextOutlineColor: "#070c16"
   };
 
   try {
@@ -315,7 +319,20 @@ function getInitialState(currentYear) {
             : fallback.monthBorderColor,
       dayBorderColor: typeof parsedState.dayBorderColor === "string" ? parsedState.dayBorderColor : fallback.dayBorderColor,
       surfaceColor: typeof parsedState.surfaceColor === "string" ? parsedState.surfaceColor : fallback.surfaceColor,
-      radiusScale: Number(parsedState.radiusScale) || fallback.radiusScale
+      radiusScale: Number(parsedState.radiusScale) || fallback.radiusScale,
+      showMonthTextOnImage:
+        typeof parsedState.showMonthTextOnImage === "boolean"
+          ? parsedState.showMonthTextOnImage
+          : fallback.showMonthTextOnImage,
+      showMonthTextOutline:
+        typeof parsedState.showMonthTextOutline === "boolean"
+          ? parsedState.showMonthTextOutline
+          : fallback.showMonthTextOutline,
+      monthTextColor: typeof parsedState.monthTextColor === "string" ? parsedState.monthTextColor : fallback.monthTextColor,
+      monthTextOutlineColor:
+        typeof parsedState.monthTextOutlineColor === "string"
+          ? parsedState.monthTextOutlineColor
+          : fallback.monthTextOutlineColor
     };
   } catch {
     return fallback;
@@ -380,6 +397,11 @@ function importProjectState(payload, currentYear) {
     dayBorderColor: typeof settings.dayBorderColor === "string" ? settings.dayBorderColor : "#c9d4ea",
     surfaceColor: typeof settings.surfaceColor === "string" ? settings.surfaceColor : "#fff6ec",
     radiusScale: Number(settings.radiusScale) || 18,
+    showMonthTextOnImage: typeof settings.showMonthTextOnImage === "boolean" ? settings.showMonthTextOnImage : true,
+    showMonthTextOutline: typeof settings.showMonthTextOutline === "boolean" ? settings.showMonthTextOutline : true,
+    monthTextColor: typeof settings.monthTextColor === "string" ? settings.monthTextColor : "#ffffff",
+    monthTextOutlineColor:
+      typeof settings.monthTextOutlineColor === "string" ? settings.monthTextOutlineColor : "#070c16",
     images: importedImages
   };
 }
@@ -468,6 +490,10 @@ export default function App() {
   const [dayBorderColor, setDayBorderColor] = useState(initialState.dayBorderColor);
   const [surfaceColor, setSurfaceColor] = useState(initialState.surfaceColor);
   const [radiusScale, setRadiusScale] = useState(initialState.radiusScale);
+  const [showMonthTextOnImage, setShowMonthTextOnImage] = useState(initialState.showMonthTextOnImage);
+  const [showMonthTextOutline, setShowMonthTextOutline] = useState(initialState.showMonthTextOutline);
+  const [monthTextColor, setMonthTextColor] = useState(initialState.monthTextColor);
+  const [monthTextOutlineColor, setMonthTextOutlineColor] = useState(initialState.monthTextOutlineColor);
   const [isDragActive, setIsDragActive] = useState(false);
   const [images, setImages] = useState(getDefaultImages);
   const [isFontMenuOpen, setIsFontMenuOpen] = useState(false);
@@ -567,7 +593,11 @@ export default function App() {
         monthBorderColor,
         dayBorderColor,
         surfaceColor,
-        radiusScale
+        radiusScale,
+        showMonthTextOnImage,
+        showMonthTextOutline,
+        monthTextColor,
+        monthTextOutlineColor
       };
 
       localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToPersist));
@@ -582,9 +612,13 @@ export default function App() {
     fontFamily,
     formatId,
     hasHydratedStorage,
+    monthTextColor,
+    monthTextOutlineColor,
     monthImageAssignments,
     monthImageTransforms,
     radiusScale,
+    showMonthTextOnImage,
+    showMonthTextOutline,
     showFoldGuide,
     selectedLayout,
     selectedStyle,
@@ -812,7 +846,11 @@ export default function App() {
         monthBorderColor,
         dayBorderColor,
         surfaceColor,
-        radiusScale
+        radiusScale,
+        showMonthTextOnImage,
+        showMonthTextOutline,
+        monthTextColor,
+        monthTextOutlineColor
       },
       images: images.map((image, index) => ({
         order: index + 1,
@@ -859,6 +897,10 @@ export default function App() {
       setDayBorderColor(importedState.dayBorderColor);
       setSurfaceColor(importedState.surfaceColor);
       setRadiusScale(importedState.radiusScale);
+      setShowMonthTextOnImage(importedState.showMonthTextOnImage);
+      setShowMonthTextOutline(importedState.showMonthTextOutline);
+      setMonthTextColor(importedState.monthTextColor);
+      setMonthTextOutlineColor(importedState.monthTextOutlineColor);
       setImages(importedState.images);
       setStorageNotice("");
     } catch {
@@ -888,7 +930,9 @@ export default function App() {
         "--surface-color": normalizeHexColor(surfaceColor, "#fff6ec"),
         "--surface-warm-88": mixColors(surfaceColor, "#f0e0c7", 0.88),
         "--surface-light-92": mixColors(surfaceColor, "#ffffff", 0.92),
-        "--radius-scale": `${radiusScale}px`
+        "--radius-scale": `${radiusScale}px`,
+        "--month-text-color": normalizeHexColor(monthTextColor, "#ffffff"),
+        "--month-text-outline-color": normalizeHexColor(monthTextOutlineColor, "#070c16")
       }}
     >
       <header className="toolbar">
@@ -966,8 +1010,10 @@ export default function App() {
               ))}
             </select>
           </div>
+        </div>
 
-          <div className="field field--wide">
+        <div className="toolbar__theme-row">
+          <div className="field field--theme">
             <span>Tema Calendario</span>
             <div className="theme-config">
               <label className="theme-swatch">
@@ -998,6 +1044,18 @@ export default function App() {
                 <i style={{ backgroundColor: surfaceColor }}></i>
                 <input type="color" value={surfaceColor} onChange={(event) => setSurfaceColor(event.target.value)} />
               </label>
+              <label className="theme-swatch">
+                <i style={{ backgroundColor: monthTextColor }}></i>
+                <input type="color" value={monthTextColor} onChange={(event) => setMonthTextColor(event.target.value)} />
+              </label>
+              <label className="theme-swatch">
+                <i style={{ backgroundColor: monthTextOutlineColor }}></i>
+                <input
+                  type="color"
+                  value={monthTextOutlineColor}
+                  onChange={(event) => setMonthTextOutlineColor(event.target.value)}
+                />
+              </label>
               <label className="radius-control">
                 <span>{radiusScale}px</span>
                 <input
@@ -1017,9 +1075,24 @@ export default function App() {
                 />
                 <span>Guida</span>
               </label>
+              <label className="toggle-inline">
+                <input
+                  type="checkbox"
+                  checked={showMonthTextOnImage}
+                  onChange={(event) => setShowMonthTextOnImage(event.target.checked)}
+                />
+                <span>Mese</span>
+              </label>
+              <label className="toggle-inline">
+                <input
+                  type="checkbox"
+                  checked={showMonthTextOutline}
+                  onChange={(event) => setShowMonthTextOutline(event.target.checked)}
+                />
+                <span>Outline</span>
+              </label>
             </div>
           </div>
-
         </div>
 
         {storageNotice ? <p className="toolbar__notice toolbar__notice--row">{storageNotice}</p> : null}
@@ -1143,6 +1216,8 @@ export default function App() {
                 styleName={selectedStyleDef.className}
                 layoutName={selectedLayoutDef.id}
                 showFoldGuide={showFoldGuide}
+                showMonthTextOnImage={showMonthTextOnImage}
+                showMonthTextOutline={showMonthTextOutline}
                 onImageAdjust={updateMonthImageTransform}
                 onImageReset={resetMonthImageTransform}
                 onImageAssign={assignImageToMonth}
@@ -1170,6 +1245,8 @@ function PrintSheetPreview({
   styleName,
   layoutName,
   showFoldGuide,
+  showMonthTextOnImage,
+  showMonthTextOutline,
   onImageAdjust,
   onImageReset,
   onImageAssign,
@@ -1179,9 +1256,11 @@ function PrintSheetPreview({
   const ratio = format.width / format.height;
   const dragStateRef = useRef(null);
   const imageViewportRef = useRef(null);
+  const imageCanvasRef = useRef(null);
   const [isDraggingImage, setIsDraggingImage] = useState(false);
   const [isDropTarget, setIsDropTarget] = useState(false);
   const [imageRatio, setImageRatio] = useState(1);
+  const [imageElement, setImageElement] = useState(null);
   const [viewportSize, setViewportSize] = useState({ width: 1, height: 1 });
   const foldClass =
     layoutName === "vertical-split" || layoutName === "booklet-center"
@@ -1217,6 +1296,7 @@ function PrintSheetPreview({
   useEffect(() => {
     if (!month.image?.src) {
       setImageRatio(1);
+      setImageElement(null);
       return;
     }
 
@@ -1224,7 +1304,12 @@ function PrintSheetPreview({
     nextImage.onload = () => {
       if (nextImage.naturalWidth > 0 && nextImage.naturalHeight > 0) {
         setImageRatio(nextImage.naturalWidth / nextImage.naturalHeight);
+        setImageElement(nextImage);
       }
+    };
+    nextImage.onerror = () => {
+      setImageRatio(1);
+      setImageElement(null);
     };
     nextImage.src = month.image.src;
   }, [month.image?.src]);
@@ -1238,8 +1323,63 @@ function PrintSheetPreview({
   const renderedHeightPx = baseHeightPx * month.imageTransform.zoom;
   const maxPanXPx = Math.max(0, (renderedWidthPx - viewportSize.width) / 2);
   const maxPanYPx = Math.max(0, (renderedHeightPx - viewportSize.height) / 2);
-  const imageLeftPx = (viewportSize.width - renderedWidthPx) / 2 + month.imageTransform.x * maxPanXPx;
-  const imageTopPx = (viewportSize.height - renderedHeightPx) / 2 + month.imageTransform.y * maxPanYPx;
+
+  useEffect(() => {
+    const canvas = imageCanvasRef.current;
+    if (!canvas) {
+      return;
+    }
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return;
+    }
+
+    const cssWidth = Math.max(Math.round(viewportSize.width), 1);
+    const cssHeight = Math.max(Math.round(viewportSize.height), 1);
+    const deviceScale = window.devicePixelRatio || 1;
+    canvas.width = Math.max(Math.round(cssWidth * deviceScale), 1);
+    canvas.height = Math.max(Math.round(cssHeight * deviceScale), 1);
+    canvas.style.width = `${cssWidth}px`;
+    canvas.style.height = `${cssHeight}px`;
+
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (!imageElement) {
+      return;
+    }
+
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.scale(deviceScale, deviceScale);
+
+    const sourceWidth = Math.min(imageElement.naturalWidth, viewportSize.width / (baseWidthPx / imageElement.naturalWidth) / month.imageTransform.zoom);
+    const sourceHeight = Math.min(imageElement.naturalHeight, viewportSize.height / (baseHeightPx / imageElement.naturalHeight) / month.imageTransform.zoom);
+    const sourceX = ((imageElement.naturalWidth - sourceWidth) / 2) * (1 - month.imageTransform.x);
+    const sourceY = ((imageElement.naturalHeight - sourceHeight) / 2) * (1 - month.imageTransform.y);
+
+    context.drawImage(
+      imageElement,
+      sourceX,
+      sourceY,
+      sourceWidth,
+      sourceHeight,
+      0,
+      0,
+      cssWidth,
+      cssHeight
+    );
+  }, [
+    baseHeightPx,
+    baseWidthPx,
+    imageElement,
+    month.imageTransform.x,
+    month.imageTransform.y,
+    month.imageTransform.zoom,
+    viewportSize.height,
+    viewportSize.width
+  ]);
 
   function stopImageDrag(event) {
     if (dragStateRef.current?.pointerId === event.pointerId) {
@@ -1363,26 +1503,18 @@ function PrintSheetPreview({
         title="Shift + drag per pan, Alt + drag per zoom, doppio click per reset, drop immagine per sostituire"
       >
         {month.image ? (
-          <div
-            className={isDraggingImage ? "sheet-preview__image-stage is-dragging" : "sheet-preview__image-stage"}
-            style={{
-              width: `${renderedWidthPx}px`,
-              height: `${renderedHeightPx}px`,
-              left: `${imageLeftPx}px`,
-              top: `${imageTopPx}px`
-            }}
-          >
-            <img
-              className="sheet-preview__image-media"
-              src={month.image.src}
-              alt=""
-              draggable="false"
+          <div className="sheet-preview__image-viewport" aria-hidden="true">
+            <canvas
+              ref={imageCanvasRef}
+              className={isDraggingImage ? "sheet-preview__image-canvas is-dragging" : "sheet-preview__image-canvas"}
             />
           </div>
         ) : null}
-        <div className="month-card__heading">
-          <h3>{month.label}</h3>
-        </div>
+        {showMonthTextOnImage ? (
+          <div className="month-card__heading">
+            <h3 className={showMonthTextOutline ? "" : "month-card__title--no-outline"}>{month.label}</h3>
+          </div>
+        ) : null}
       </div>
 
       <div className="sheet-preview__calendar">
