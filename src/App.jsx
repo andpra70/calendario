@@ -1,4 +1,11 @@
+import html2canvas from "html2canvas";
+import { jsPDF } from "jspdf";
 import { useEffect, useMemo, useRef, useState } from "react";
+
+const STORAGE_KEY = "calendar-composer-state-v1";
+const IMAGE_DB_NAME = "calendar-composer-db";
+const IMAGE_STORE_NAME = "project_assets";
+const IMAGE_RECORD_KEY = "current_images";
 
 const pageFormats = [
   { id: "A0", label: "A0", width: 841, height: 1189 },
@@ -149,14 +156,183 @@ function createPlaceholderImage(label, colorA, colorB) {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
-function toImageItem(src, name, isPreset = false, isObjectUrl = false) {
+function toImageItem(src, name, isPreset = false) {
   return {
     id: `${name}-${Math.random().toString(36).slice(2, 9)}`,
     src,
     name,
-    isPreset,
-    isObjectUrl
+    isPreset
   };
+}
+
+function normalizeHexColor(value, fallback = "#4f7cff") {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  const normalized = value.trim();
+  if (/^#([0-9a-f]{3}){1,2}$/i.test(normalized)) {
+    if (normalized.length === 4) {
+      return `#${normalized[1]}${normalized[1]}${normalized[2]}${normalized[2]}${normalized[3]}${normalized[3]}`.toLowerCase();
+    }
+    return normalized.toLowerCase();
+  }
+
+  return fallback;
+}
+
+function hexToRgb(value) {
+  const normalized = normalizeHexColor(value);
+  return {
+    r: Number.parseInt(normalized.slice(1, 3), 16),
+    g: Number.parseInt(normalized.slice(3, 5), 16),
+    b: Number.parseInt(normalized.slice(5, 7), 16)
+  };
+}
+
+function mixColors(colorA, colorB, weightA = 0.5) {
+  const a = hexToRgb(colorA);
+  const b = hexToRgb(colorB);
+  const weightB = 1 - weightA;
+  const toHex = (channel) => Math.round(channel).toString(16).padStart(2, "0");
+
+  return `#${toHex(a.r * weightA + b.r * weightB)}${toHex(a.g * weightA + b.g * weightB)}${toHex(a.b * weightA + b.b * weightB)}`;
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error ?? new Error(`Errore lettura file: ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+}
+
+function isValidOption(value, options, key = "id") {
+  return options.some((option) => option[key] === value);
+}
+
+function getDefaultImages() {
+  return starterImages.map((src, index) => toImageItem(src, `Preset ${index + 1}`, true));
+}
+
+function getInitialState(currentYear) {
+  const fallback = {
+    year: currentYear,
+    formatId: "A4",
+    fontFamily: fonts[0],
+    selectedStyle: styleOptions[0].id,
+    selectedLayout: layoutOptions[0].id,
+    accentColor: "#4f7cff",
+    borderColor: "#d7ddea",
+    surfaceColor: "#fff6ec",
+    radiusScale: 18
+  };
+
+  try {
+    const rawState = localStorage.getItem(STORAGE_KEY);
+    if (!rawState) {
+      return fallback;
+    }
+
+    const parsedState = JSON.parse(rawState);
+    return {
+      year: Number(parsedState.year) || currentYear,
+      formatId: isValidOption(parsedState.formatId, pageFormats) ? parsedState.formatId : fallback.formatId,
+      fontFamily: isValidOption(parsedState.fontFamily, fonts.map((font) => ({ id: font }))) ? parsedState.fontFamily : fallback.fontFamily,
+      selectedStyle: isValidOption(parsedState.selectedStyle, styleOptions) ? parsedState.selectedStyle : fallback.selectedStyle,
+      selectedLayout: isValidOption(parsedState.selectedLayout, layoutOptions) ? parsedState.selectedLayout : fallback.selectedLayout,
+      accentColor: typeof parsedState.accentColor === "string" ? parsedState.accentColor : fallback.accentColor,
+      borderColor: typeof parsedState.borderColor === "string" ? parsedState.borderColor : fallback.borderColor,
+      surfaceColor: typeof parsedState.surfaceColor === "string" ? parsedState.surfaceColor : fallback.surfaceColor,
+      radiusScale: Number(parsedState.radiusScale) || fallback.radiusScale
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function getLegacyLocalImages() {
+  try {
+    const rawState = localStorage.getItem(STORAGE_KEY);
+    if (!rawState) {
+      return null;
+    }
+
+    const parsedState = JSON.parse(rawState);
+    if (!Array.isArray(parsedState.images) || parsedState.images.length === 0) {
+      return null;
+    }
+
+    return parsedState.images
+      .filter((image) => typeof image?.src === "string" && typeof image?.name === "string")
+      .map((image) => ({
+        id: image.id || `${image.name}-${Math.random().toString(36).slice(2, 9)}`,
+        src: image.src,
+        name: image.name,
+        isPreset: Boolean(image.isPreset)
+      }));
+  } catch {
+    return null;
+  }
+}
+
+function openImageDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = window.indexedDB.open(IMAGE_DB_NAME, 1);
+
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(IMAGE_STORE_NAME)) {
+        database.createObjectStore(IMAGE_STORE_NAME);
+      }
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("Impossibile aprire IndexedDB"));
+  });
+}
+
+function loadImagesFromIndexedDb() {
+  return new Promise((resolve, reject) => {
+    openImageDatabase()
+      .then((database) => {
+        const transaction = database.transaction(IMAGE_STORE_NAME, "readonly");
+        const store = transaction.objectStore(IMAGE_STORE_NAME);
+        const request = store.get(IMAGE_RECORD_KEY);
+
+        request.onsuccess = () => {
+          database.close();
+          resolve(Array.isArray(request.result) ? request.result : null);
+        };
+        request.onerror = () => {
+          database.close();
+          reject(request.error ?? new Error("Impossibile leggere le immagini salvate"));
+        };
+      })
+      .catch(reject);
+  });
+}
+
+function saveImagesToIndexedDb(images) {
+  return new Promise((resolve, reject) => {
+    openImageDatabase()
+      .then((database) => {
+        const transaction = database.transaction(IMAGE_STORE_NAME, "readwrite");
+        const store = transaction.objectStore(IMAGE_STORE_NAME);
+        store.put(images, IMAGE_RECORD_KEY);
+
+        transaction.oncomplete = () => {
+          database.close();
+          resolve();
+        };
+        transaction.onerror = () => {
+          database.close();
+          reject(transaction.error ?? new Error("Impossibile salvare le immagini"));
+        };
+      })
+      .catch(reject);
+  });
 }
 
 function escapeHtml(value) {
@@ -168,326 +344,28 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
-function buildPrintDocument({ year, pageFormat, fontFamily, styleDefinition, layoutDefinition, monthsData }) {
-  const fontQuery = fonts.map((font) => `family=${font.replaceAll(" ", "+")}:wght@400;500;700`).join("&");
-  const css = `
-    @page {
-      size: ${pageFormat.width}mm ${pageFormat.height}mm;
-      margin: 0;
-    }
-
-    * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    html, body { margin: 0; padding: 0; background: #ffffff; }
-    body { font-family: '${fontFamily}', sans-serif; color: #101828; }
-    .print-root { width: ${pageFormat.width}mm; margin: 0 auto; }
-    .print-page {
-      position: relative;
-      width: ${pageFormat.width}mm;
-      height: ${pageFormat.height}mm;
-      overflow: hidden;
-      page-break-after: always;
-      break-after: page;
-      background: #ffffff;
-    }
-    .print-page:last-child { page-break-after: auto; break-after: auto; }
-    .print-page__bg {
-      position: absolute;
-      inset: 0;
-      background-size: cover;
-      background-position: center;
-      background-repeat: no-repeat;
-    }
-    .print-page__overlay {
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(180deg, rgba(8, 15, 28, 0.02), rgba(8, 15, 28, 0.16));
-    }
-    .print-sheet {
-      position: relative;
-      z-index: 1;
-      width: 100%;
-      height: 100%;
-      padding: 8mm;
-      display: grid;
-      gap: 6mm;
-    }
-    .print-layout-half-top,
-    .print-layout-half-bottom {
-      grid-template-rows: 1fr 1fr;
-    }
-    .print-layout-vertical-split,
-    .print-layout-booklet-center {
-      grid-template-columns: 1fr 1fr;
-    }
-    .print-layout-half-bottom .print-image-panel { order: 2; }
-    .print-layout-half-bottom .print-calendar-panel { order: 1; }
-    .print-fold-guide {
-      position: absolute;
-      z-index: 2;
-      opacity: 0.9;
-      pointer-events: none;
-    }
-    .print-fold-guide--horizontal {
-      left: 8mm;
-      right: 8mm;
-      top: 50%;
-      border-top: 0.4mm dashed rgba(16, 24, 40, 0.3);
-    }
-    .print-fold-guide--vertical {
-      top: 8mm;
-      bottom: 8mm;
-      left: 50%;
-      border-left: 0.4mm dashed rgba(16, 24, 40, 0.3);
-    }
-    .print-image-panel,
-    .print-calendar-panel {
-      position: relative;
-      overflow: hidden;
-      border-radius: 5mm;
-    }
-    .print-image-panel {
-      min-height: 0;
-      background:
-        linear-gradient(180deg, rgba(6, 12, 21, 0.08), rgba(6, 12, 21, 0.18)),
-        linear-gradient(135deg, #6283e5, #f0aa62);
-      background-size: cover;
-      background-position: center;
-    }
-    .print-booklet-cover {
-      position: absolute;
-      left: 4mm;
-      top: 4mm;
-      padding: 2mm 3mm;
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.82);
-      font-size: 3mm;
-      font-weight: 700;
-      letter-spacing: 0.4mm;
-      text-transform: uppercase;
-    }
-    .print-heading {
-      position: absolute;
-      left: 5mm;
-      right: 5mm;
-      bottom: 5mm;
-      color: #ffffff;
-    }
-    .print-heading__index {
-      display: block;
-      margin-bottom: 1.5mm;
-      font-size: 3.2mm;
-      letter-spacing: 0.8mm;
-      text-transform: uppercase;
-      opacity: 0.82;
-    }
-    .print-heading h2 {
-      margin: 0;
-      font-size: 11mm;
-      line-height: 0.94;
-    }
-    .print-calendar-panel {
-      display: grid;
-      grid-template-rows: auto auto 1fr;
-      padding: 5mm;
-      background: rgba(255, 255, 255, 0.96);
-      color: #101828;
-      border: 0.25mm solid rgba(16, 24, 40, 0.08);
-    }
-    .print-calendar-header {
-      display: flex;
-      justify-content: space-between;
-      gap: 4mm;
-      align-items: flex-end;
-      margin-bottom: 4mm;
-    }
-    .print-calendar-header h3 {
-      margin: 0;
-      font-size: 6mm;
-      line-height: 1;
-    }
-    .print-calendar-header span {
-      font-size: 3mm;
-      letter-spacing: 0.5mm;
-      text-transform: uppercase;
-      color: rgba(16, 24, 40, 0.66);
-    }
-    .print-weekdays,
-    .print-days {
-      display: grid;
-      grid-template-columns: repeat(7, 1fr);
-      gap: 1.4mm;
-    }
-    .print-weekdays {
-      margin-bottom: 1.8mm;
-      font-size: 2.7mm;
-      font-weight: 700;
-      text-transform: uppercase;
-      color: rgba(16, 24, 40, 0.62);
-    }
-    .print-day {
-      min-height: 8.5mm;
-      display: grid;
-      place-items: center;
-      border-radius: 2mm;
-      font-size: 3.4mm;
-      background: rgba(16, 24, 40, 0.05);
-    }
-    .print-day.is-empty { background: rgba(16, 24, 40, 0.025); color: transparent; }
-    .print-page__footer {
-      display: flex;
-      justify-content: space-between;
-      margin-top: 3mm;
-      font-size: 2.6mm;
-      color: rgba(16, 24, 40, 0.62);
-    }
-    .print-layout-booklet-center .print-calendar-panel,
-    .print-layout-vertical-split .print-calendar-panel {
-      height: calc(100% - 0mm);
-    }
-    .print-layout-booklet-center .print-image-panel,
-    .print-layout-vertical-split .print-image-panel {
-      height: calc(100% - 0mm);
-    }
-    .print-layout-booklet-center .print-image-panel {
-      border-top-right-radius: 1.2mm;
-      border-bottom-right-radius: 1.2mm;
-    }
-    .print-layout-booklet-center .print-calendar-panel {
-      border-top-left-radius: 1.2mm;
-      border-bottom-left-radius: 1.2mm;
-      box-shadow: inset -0.6mm 0 0 rgba(16, 24, 40, 0.08);
-    }
-    .print-style-1 .print-page__overlay { background: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.32) 100%); }
-    .print-style-2 .print-calendar-panel { background: #f6ead7; }
-    .print-style-2 .print-image-panel::after {
-      content: "";
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0));
-    }
-    .print-style-3 .print-calendar-panel { background: rgba(255, 249, 239, 0.98); border: 0.25mm solid rgba(158, 111, 66, 0.18); }
-    .print-style-4 .print-page__overlay { background: linear-gradient(90deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 45%, rgba(0, 0, 0, 0.1) 100%); }
-    .print-style-5 .print-image-panel::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      background:
-        radial-gradient(circle at 20% 18%, rgba(255, 255, 255, 0.26), transparent 18%),
-        radial-gradient(circle at 82% 16%, rgba(255, 255, 255, 0.16), transparent 16%);
-    }
-    .print-style-6 .print-image-panel::before {
-      content: "";
-      position: absolute;
-      inset: 4mm 4mm auto;
-      height: 32mm;
-      border: 0.35mm solid rgba(255, 255, 255, 0.4);
-      border-bottom: 0;
-      border-radius: 50mm 50mm 0 0;
-    }
-    .print-style-7 .print-calendar-panel { box-shadow: inset 3mm 0 0 rgba(16, 24, 40, 0.08); }
-    .print-style-8 .print-image-panel::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      background:
-        linear-gradient(90deg, rgba(255, 255, 255, 0.1) 0.2mm, transparent 0.2mm),
-        linear-gradient(rgba(255, 255, 255, 0.08) 0.2mm, transparent 0.2mm);
-      background-size: 14mm 14mm;
-    }
-  `;
-
-  const pages = monthsData
-    .map((month) => {
-      const imageStyle = month.image ? ` style="background-image: url('${month.image.src}');"` : "";
-      const foldClass =
-        layoutDefinition.id === "vertical-split" || layoutDefinition.id === "booklet-center"
-          ? "print-fold-guide print-fold-guide--vertical"
-          : "print-fold-guide print-fold-guide--horizontal";
-
-      const calendarDays = month.grid
-        .map(
-          (day) =>
-            `<div class="print-day${day ? "" : " is-empty"}">${day ? escapeHtml(day) : "&nbsp;"}</div>`
-        )
-        .join("");
-
-      return `
-        <section class="print-page ${styleDefinition.printClass}">
-          <div class="print-page__bg"></div>
-          <div class="print-page__overlay"></div>
-          <div class="print-sheet print-layout-${layoutDefinition.id}">
-            <div class="print-image-panel"${imageStyle}>
-              <div class="print-booklet-cover">${escapeHtml(pageFormat.label)} • ${escapeHtml(layoutDefinition.label)}</div>
-              <div class="print-heading">
-                <span class="print-heading__index">${String(month.monthIndex + 1).padStart(2, "0")}</span>
-                <h2>${escapeHtml(month.label)}</h2>
-              </div>
-            </div>
-            <div class="print-calendar-panel">
-              <div class="print-calendar-header">
-                <div>
-                  <span>${escapeHtml(layoutDefinition.label)}</span>
-                  <h3>${escapeHtml(month.label)} ${escapeHtml(year)}</h3>
-                </div>
-                <span>${escapeHtml(month.image ? month.image.name : "No image")}</span>
-              </div>
-              <div class="print-weekdays">${weekdays.map((weekday) => `<div>${escapeHtml(weekday)}</div>`).join("")}</div>
-              <div class="print-days">${calendarDays}</div>
-              <div class="print-page__footer">
-                <span>Formato ${escapeHtml(pageFormat.label)} ${pageFormat.width} x ${pageFormat.height} mm</span>
-                <span>${escapeHtml(fontFamily)}</span>
-              </div>
-            </div>
-          </div>
-          <div class="${foldClass}"></div>
-        </section>
-      `;
-    })
-    .join("");
-
-  return `
-    <!doctype html>
-    <html lang="it">
-      <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Calendario ${escapeHtml(year)} ${escapeHtml(pageFormat.label)}</title>
-        <link rel="preconnect" href="https://fonts.googleapis.com">
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?${fontQuery}&display=swap">
-        <style>${css}</style>
-      </head>
-      <body>
-        <main class="print-root">${pages}</main>
-        <script>
-          const runPrint = async () => {
-            if (document.fonts && document.fonts.ready) {
-              await document.fonts.ready;
-            }
-            setTimeout(() => window.print(), 150);
-          };
-          window.addEventListener("load", runPrint);
-          window.addEventListener("afterprint", () => window.close());
-        </script>
-      </body>
-    </html>
-  `;
-}
-
 export default function App() {
   const currentYear = new Date().getFullYear();
-  const [year, setYear] = useState(currentYear);
-  const [formatId, setFormatId] = useState("A4");
-  const [fontFamily, setFontFamily] = useState(fonts[0]);
-  const [selectedStyle, setSelectedStyle] = useState(styleOptions[0].id);
-  const [selectedLayout, setSelectedLayout] = useState(layoutOptions[0].id);
+  const initialState = useMemo(() => getInitialState(currentYear), [currentYear]);
+  const [year, setYear] = useState(initialState.year);
+  const [formatId, setFormatId] = useState(initialState.formatId);
+  const [fontFamily, setFontFamily] = useState(initialState.fontFamily);
+  const [selectedStyle, setSelectedStyle] = useState(initialState.selectedStyle);
+  const [selectedLayout, setSelectedLayout] = useState(initialState.selectedLayout);
+  const [accentColor, setAccentColor] = useState(initialState.accentColor);
+  const [borderColor, setBorderColor] = useState(initialState.borderColor);
+  const [surfaceColor, setSurfaceColor] = useState(initialState.surfaceColor);
+  const [radiusScale, setRadiusScale] = useState(initialState.radiusScale);
   const [isDragActive, setIsDragActive] = useState(false);
-  const [images, setImages] = useState(
-    starterImages.map((src, index) => toImageItem(src, `Preset ${index + 1}`, true))
-  );
+  const [images, setImages] = useState(getDefaultImages);
   const [isFontMenuOpen, setIsFontMenuOpen] = useState(false);
+  const [storageNotice, setStorageNotice] = useState("");
+  const [hasHydratedStorage, setHasHydratedStorage] = useState(false);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [pdfProgress, setPdfProgress] = useState(0);
+  const [pdfStatus, setPdfStatus] = useState("");
   const fontMenuRef = useRef(null);
-  const objectUrlsRef = useRef(new Set());
+  const pdfRenderRef = useRef(null);
 
   useEffect(() => {
     const fontQuery = fonts.map((font) => `family=${font.replaceAll(" ", "+")}:wght@400;500;700`).join("&");
@@ -514,13 +392,98 @@ export default function App() {
     };
   }, []);
 
-  useEffect(
-    () => () => {
-      objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
-      objectUrlsRef.current.clear();
-    },
-    []
-  );
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function hydrateStorage() {
+      try {
+        const storedImages = await loadImagesFromIndexedDb();
+        if (isCancelled) {
+          return;
+        }
+
+        if (Array.isArray(storedImages) && storedImages.length > 0) {
+          setImages(storedImages);
+        } else {
+          const legacyImages = getLegacyLocalImages();
+          if (legacyImages?.length) {
+            setImages(legacyImages);
+            await saveImagesToIndexedDb(legacyImages);
+          }
+        }
+      } catch {
+        const legacyImages = getLegacyLocalImages();
+        if (!isCancelled && legacyImages?.length) {
+          setImages(legacyImages);
+        }
+        if (!isCancelled) {
+          setStorageNotice("Persistenza immagini ridotta: IndexedDB non disponibile.");
+        }
+      } finally {
+        if (!isCancelled) {
+          setHasHydratedStorage(true);
+        }
+      }
+    }
+
+    hydrateStorage();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hasHydratedStorage) {
+      return;
+    }
+
+    try {
+      const stateToPersist = {
+        year,
+        formatId,
+        fontFamily,
+        selectedStyle,
+        selectedLayout,
+        accentColor,
+        borderColor,
+        surfaceColor,
+        radiusScale
+      };
+
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToPersist));
+    } catch {
+      setStorageNotice("Impossibile salvare la configurazione in localStorage.");
+    }
+  }, [
+    accentColor,
+    borderColor,
+    fontFamily,
+    formatId,
+    hasHydratedStorage,
+    radiusScale,
+    selectedLayout,
+    selectedStyle,
+    surfaceColor,
+    year
+  ]);
+
+  useEffect(() => {
+    if (!hasHydratedStorage) {
+      return;
+    }
+
+    saveImagesToIndexedDb(
+      images.map((image) => ({
+        id: image.id,
+        src: image.src,
+        name: image.name,
+        isPreset: image.isPreset
+      }))
+    ).catch(() => {
+      setStorageNotice("Immagini non persistite localmente: esporta JSON per salvarle.");
+    });
+  }, [hasHydratedStorage, images]);
 
   const pageFormat = useMemo(
     () => pageFormats.find((format) => format.id === formatId) ?? pageFormats[4],
@@ -546,35 +509,33 @@ export default function App() {
     [images, year]
   );
 
-  function appendImages(files) {
+  async function appendImages(files) {
     const imageFiles = Array.from(files ?? []).filter((file) => file.type.startsWith("image/"));
     if (imageFiles.length === 0) {
       return;
     }
 
-    const nextImages = imageFiles.map((file) => {
-      const objectUrl = URL.createObjectURL(file);
-      objectUrlsRef.current.add(objectUrl);
-      return toImageItem(objectUrl, file.name, false, true);
-    });
+    const nextImages = await Promise.all(
+      imageFiles.map(async (file) => toImageItem(await fileToDataUrl(file), file.name))
+    );
 
     setImages((current) => [...current, ...nextImages]);
   }
 
-  function handleImageUpload(event) {
+  async function handleImageUpload(event) {
     const files = Array.from(event.target.files ?? []);
     if (files.length === 0) {
       return;
     }
 
-    appendImages(files);
+    await appendImages(files);
     event.target.value = "";
   }
 
-  function handleDrop(event) {
+  async function handleDrop(event) {
     event.preventDefault();
     setIsDragActive(false);
-    appendImages(event.dataTransfer.files);
+    await appendImages(event.dataTransfer.files);
   }
 
   function handleDragOver(event) {
@@ -592,39 +553,130 @@ export default function App() {
   }
 
   function removeImage(imageId) {
-    setImages((current) => {
-      const imageToRemove = current.find((image) => image.id === imageId);
-      if (imageToRemove?.isObjectUrl) {
-        URL.revokeObjectURL(imageToRemove.src);
-        objectUrlsRef.current.delete(imageToRemove.src);
-      }
-      return current.filter((image) => image.id !== imageId);
-    });
+    setImages((current) => current.filter((image) => image.id !== imageId));
   }
 
-  function handleGeneratePdf() {
-    const printWindow = window.open("", "_blank", "noopener,noreferrer");
-    if (!printWindow) {
-      window.alert("Impossibile aprire la finestra di stampa. Verifica il blocco popup del browser.");
+  async function handleExportPdf() {
+    if (!pdfRenderRef.current || isExportingPdf) {
       return;
     }
 
-    const printDocument = buildPrintDocument({
-      year,
-      pageFormat,
-      fontFamily,
-      styleDefinition: selectedStyleDef,
-      layoutDefinition: selectedLayoutDef,
-      monthsData
-    });
+    try {
+      setIsExportingPdf(true);
+      setPdfProgress(2);
+      setPdfStatus("Preparazione pagine PDF");
 
-    printWindow.document.open();
-    printWindow.document.write(printDocument);
-    printWindow.document.close();
+      if (document.fonts?.ready) {
+        await document.fonts.ready;
+      }
+
+      const pageNodes = Array.from(pdfRenderRef.current.querySelectorAll("[data-pdf-page='true']"));
+      if (pageNodes.length === 0) {
+        throw new Error("Nessuna pagina disponibile per l'export.");
+      }
+
+      const pdf = new jsPDF({
+        orientation: pageFormat.width > pageFormat.height ? "landscape" : "portrait",
+        unit: "mm",
+        format: [pageFormat.width, pageFormat.height],
+        compress: true
+      });
+
+      for (let index = 0; index < pageNodes.length; index += 1) {
+        const pageNode = pageNodes[index];
+        setPdfStatus(`Rendering mese ${index + 1} di ${pageNodes.length}`);
+        setPdfProgress(Math.round((index / pageNodes.length) * 85) + 5);
+
+        // Let React flush the progress state before heavy rendering.
+        await new Promise((resolve) => window.requestAnimationFrame(resolve));
+
+        const canvas = await html2canvas(pageNode, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: "#ffffff",
+          logging: false
+        });
+
+        const imageData = canvas.toDataURL("image/jpeg", 0.96);
+        if (index > 0) {
+          pdf.addPage([pageFormat.width, pageFormat.height], pageFormat.width > pageFormat.height ? "landscape" : "portrait");
+        }
+        pdf.addImage(imageData, "JPEG", 0, 0, pageFormat.width, pageFormat.height, undefined, "FAST");
+      }
+
+      setPdfProgress(96);
+      setPdfStatus("Generazione file PDF");
+      pdf.save(`calendario-${year}-${formatId}.pdf`);
+      setPdfProgress(100);
+      setPdfStatus("Download completato");
+    } catch (error) {
+      console.error(error);
+      setPdfStatus("Esportazione PDF non riuscita");
+    } finally {
+      window.setTimeout(() => {
+        setIsExportingPdf(false);
+        setPdfProgress(0);
+        setPdfStatus("");
+      }, 900);
+    }
+  }
+
+  function handleExportJson() {
+    const exportData = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      settings: {
+        year,
+        formatId,
+        fontFamily,
+        selectedStyle,
+        selectedLayout,
+        accentColor,
+        borderColor,
+        surfaceColor,
+        radiusScale
+      },
+      images: images.map((image, index) => ({
+        order: index + 1,
+        id: image.id,
+        name: image.name,
+        src: image.src,
+        isPreset: image.isPreset
+      }))
+    };
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+    const downloadUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = downloadUrl;
+    link.download = `calendario-${year}-${formatId}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(downloadUrl);
   }
 
   return (
-    <div className="app-shell" style={{ "--calendar-font": `'${fontFamily}', sans-serif` }}>
+    <div
+      className="app-shell"
+      style={{
+        "--calendar-font": `'${fontFamily}', sans-serif`,
+        "--accent-color": normalizeHexColor(accentColor, "#4f7cff"),
+        "--accent-soft-10": mixColors(accentColor, "#ffffff", 0.1),
+        "--accent-soft-14": mixColors(accentColor, "#ffffff", 0.14),
+        "--accent-soft-18": mixColors(accentColor, "#ffffff", 0.18),
+        "--accent-soft-30": mixColors(accentColor, "#ffffff", 0.3),
+        "--accent-soft-35": mixColors(accentColor, "#ffcf94", 0.35),
+        "--accent-soft-45": mixColors(accentColor, "#ffffff", 0.45),
+        "--accent-dark-65": mixColors(accentColor, "#000000", 0.65),
+        "--border-color": normalizeHexColor(borderColor, "#d7ddea"),
+        "--border-soft-70": mixColors(borderColor, "#ffffff", 0.7),
+        "--surface-color": normalizeHexColor(surfaceColor, "#fff6ec"),
+        "--surface-warm-88": mixColors(surfaceColor, "#f0e0c7", 0.88),
+        "--surface-light-92": mixColors(surfaceColor, "#ffffff", 0.92),
+        "--radius-scale": `${radiusScale}px`
+      }}
+    >
       <header className="toolbar">
         <div className="toolbar__brand">
           <span className="toolbar__eyebrow">Calendar Composer</span>
@@ -632,6 +684,7 @@ export default function App() {
           <p className="toolbar__summary">
             Layout di stampa pieghevoli, preview mensile e generazione PDF nel formato pagina selezionato.
           </p>
+          {storageNotice ? <p className="toolbar__notice">{storageNotice}</p> : null}
         </div>
 
         <div className="toolbar__controls">
@@ -689,42 +742,76 @@ export default function App() {
 
           <div className="field field--wide">
             <span>Layout Stampa</span>
-            <div className="layout-picker">
+            <select value={selectedLayout} onChange={(event) => setSelectedLayout(event.target.value)}>
               {layoutOptions.map((layout) => (
-                <button
-                  key={layout.id}
-                  type="button"
-                  className={layout.id === selectedLayout ? "layout-card is-active" : "layout-card"}
-                  onClick={() => setSelectedLayout(layout.id)}
-                >
-                  <strong>{layout.label}</strong>
-                  <span>{layout.description}</span>
-                </button>
+                <option key={layout.id} value={layout.id}>
+                  {layout.label}
+                </option>
               ))}
-            </div>
+            </select>
           </div>
 
           <div className="field field--wide">
             <span>Stile Grafico</span>
-            <div className="style-picker">
+            <select value={selectedStyle} onChange={(event) => setSelectedStyle(Number(event.target.value))}>
               {styleOptions.map((style) => (
-                <button
-                  key={style.id}
-                  type="button"
-                  className={style.id === selectedStyle ? "style-chip is-active" : "style-chip"}
-                  onClick={() => setSelectedStyle(style.id)}
-                >
+                <option key={style.id} value={style.id}>
                   {style.label}
-                </button>
+                </option>
               ))}
+            </select>
+          </div>
+
+          <div className="field field--wide">
+            <span>Tema Calendario</span>
+            <div className="theme-config">
+              <label className="theme-swatch">
+                <i style={{ backgroundColor: accentColor }}></i>
+                <input type="color" value={accentColor} onChange={(event) => setAccentColor(event.target.value)} />
+              </label>
+              <label className="theme-swatch">
+                <i style={{ backgroundColor: borderColor }}></i>
+                <input type="color" value={borderColor} onChange={(event) => setBorderColor(event.target.value)} />
+              </label>
+              <label className="theme-swatch">
+                <i style={{ backgroundColor: surfaceColor }}></i>
+                <input type="color" value={surfaceColor} onChange={(event) => setSurfaceColor(event.target.value)} />
+              </label>
+              <label className="radius-control">
+                <span>{radiusScale}px</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="36"
+                  step="1"
+                  value={radiusScale}
+                  onChange={(event) => setRadiusScale(Number(event.target.value))}
+                />
+              </label>
             </div>
           </div>
 
           <div className="field field--wide field--actions">
             <span>Output</span>
-            <button type="button" className="export-button" onClick={handleGeneratePdf}>
-              Genera PDF
-            </button>
+            <div className="action-buttons">
+              <button type="button" className="export-button" onClick={handleExportPdf} disabled={isExportingPdf}>
+                {isExportingPdf ? "Esportazione PDF..." : "Esporta PDF"}
+              </button>
+              <button type="button" className="secondary-button" onClick={handleExportJson} disabled={isExportingPdf}>
+                Esporta JSON
+              </button>
+            </div>
+            {isExportingPdf ? (
+              <div className="progress-block" aria-live="polite">
+                <div className="progress-block__label">
+                  <strong>{pdfStatus || "Rendering PDF"}</strong>
+                  <span>{pdfProgress}%</span>
+                </div>
+                <div className="progress-block__track">
+                  <div className="progress-block__value" style={{ width: `${pdfProgress}%` }}></div>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       </header>
@@ -791,29 +878,6 @@ export default function App() {
               <span className="panel-label">Preview</span>
               <h2>Calendario {year}</h2>
             </div>
-            <div className="calendar-meta">
-              <span>{pageFormat.label}</span>
-              <span>{selectedLayoutDef.label}</span>
-              <span>{selectedStyleDef.label}</span>
-              <span style={{ fontFamily: `'${fontFamily}', sans-serif` }}>{fontFamily}</span>
-            </div>
-          </div>
-
-          <div className="print-specs">
-            <div>
-              <strong>Pagina finale</strong>
-              <span>
-                {pageFormat.width} x {pageFormat.height} mm
-              </span>
-            </div>
-            <div>
-              <strong>Guida piega</strong>
-              <span>{selectedLayoutDef.id === "vertical-split" || selectedLayoutDef.id === "booklet-center" ? "Verticale centrale" : "Orizzontale centrale"}</span>
-            </div>
-            <div>
-              <strong>PDF</strong>
-              <span>Stampa browser con `@page` precisa e colori forzati</span>
-            </div>
           </div>
 
           <div className="sheet-grid">
@@ -821,22 +885,34 @@ export default function App() {
               <PrintSheetPreview
                 key={month.label}
                 month={month}
-                format={pageFormat}
                 fontFamily={fontFamily}
                 styleName={selectedStyleDef.className}
                 layoutName={selectedLayoutDef.id}
-                layoutLabel={selectedLayoutDef.label}
               />
             ))}
           </div>
         </section>
       </main>
+
+      <div className="pdf-render-root" ref={pdfRenderRef} aria-hidden="true">
+        {monthsData.map((month) => (
+          <ExportSheetPage
+            key={`pdf-${month.label}`}
+            month={month}
+            fontFamily={fontFamily}
+            styleName={selectedStyleDef.className}
+            layoutName={selectedLayoutDef.id}
+            year={year}
+            borderColor={borderColor}
+            surfaceColor={surfaceColor}
+          />
+        ))}
+      </div>
     </div>
   );
 }
 
-function PrintSheetPreview({ month, format, fontFamily, styleName, layoutName, layoutLabel }) {
-  const ratio = format.width / format.height;
+function PrintSheetPreview({ month, fontFamily, styleName, layoutName }) {
   const foldClass =
     layoutName === "vertical-split" || layoutName === "booklet-center"
       ? "sheet-preview__fold sheet-preview__fold--vertical"
@@ -846,7 +922,6 @@ function PrintSheetPreview({ month, format, fontFamily, styleName, layoutName, l
     <article
       className={`sheet-preview ${styleName} layout-${layoutName}`}
       style={{
-        "--card-ratio": `${ratio}`,
         "--month-font": `'${fontFamily}', sans-serif`
       }}
     >
@@ -858,20 +933,14 @@ function PrintSheetPreview({ month, format, fontFamily, styleName, layoutName, l
             : undefined
         }}
       >
-        <div className="month-card__image-badge">{month.image ? month.image.name : "No image"}</div>
         <div className="month-card__heading">
-          <span>{month.monthIndex + 1}</span>
           <h3>{month.label}</h3>
         </div>
       </div>
 
       <div className="sheet-preview__calendar">
         <div className="sheet-preview__calendar-header">
-          <div>
-            <span>{layoutLabel}</span>
-            <strong>{month.label}</strong>
-          </div>
-          <small>{format.label}</small>
+          <strong>{month.label}</strong>
         </div>
 
         <div className="weekday-row">
@@ -887,6 +956,63 @@ function PrintSheetPreview({ month, format, fontFamily, styleName, layoutName, l
             </span>
           ))}
         </div>
+      </div>
+
+      <div className={foldClass}></div>
+    </article>
+  );
+}
+
+function ExportSheetPage({ month, fontFamily, styleName, layoutName, year, borderColor, surfaceColor }) {
+  const foldClass =
+    layoutName === "vertical-split" || layoutName === "booklet-center"
+      ? "sheet-preview__fold sheet-preview__fold--vertical"
+      : "sheet-preview__fold sheet-preview__fold--horizontal";
+
+  return (
+    <article
+      data-pdf-page="true"
+      className={`sheet-preview sheet-preview--pdf ${styleName} layout-${layoutName}`}
+      style={{
+        "--month-font": `'${fontFamily}', sans-serif`,
+        "--pdf-border-color": borderColor,
+        "--pdf-surface-color": surfaceColor
+      }}
+    >
+      <div
+        className="sheet-preview__image"
+        style={{
+          backgroundImage: month.image
+            ? `linear-gradient(180deg, rgba(7, 12, 22, 0.08), rgba(7, 12, 22, 0.46)), url(${month.image.src})`
+            : undefined
+        }}
+      >
+        <div className="month-card__heading">
+          <h3>{month.label}</h3>
+        </div>
+      </div>
+
+      <div className="sheet-preview__calendar">
+        <div className="sheet-preview__calendar-header">
+          <strong>
+            {month.label} {year}
+          </strong>
+        </div>
+
+        <div className="weekday-row">
+          {weekdays.map((weekday) => (
+            <span key={`${month.label}-pdf-${weekday}`}>{weekday}</span>
+          ))}
+        </div>
+
+        <div className="day-grid">
+          {month.grid.map((day, index) => (
+            <span key={`${month.label}-pdf-${index}`} className={day ? "day-cell" : "day-cell day-cell--empty"}>
+              {day ?? ""}
+            </span>
+          ))}
+        </div>
+
       </div>
 
       <div className={foldClass}></div>
