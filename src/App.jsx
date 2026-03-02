@@ -184,6 +184,39 @@ function fileToDataUrl(file) {
   });
 }
 
+function waitForNodeImages(node) {
+  const imageNodes = Array.from(node.querySelectorAll("img"));
+  if (imageNodes.length === 0) {
+    return Promise.resolve();
+  }
+
+  return Promise.all(
+    imageNodes.map(
+      (imageNode) =>
+        new Promise((resolve) => {
+          if (imageNode.complete && imageNode.naturalWidth > 0) {
+            if (typeof imageNode.decode === "function") {
+              imageNode.decode().catch(() => {}).finally(resolve);
+              return;
+            }
+
+            resolve();
+            return;
+          }
+
+          const complete = () => {
+            imageNode.removeEventListener("load", complete);
+            imageNode.removeEventListener("error", complete);
+            resolve();
+          };
+
+          imageNode.addEventListener("load", complete, { once: true });
+          imageNode.addEventListener("error", complete, { once: true });
+        })
+    )
+  ).then(() => undefined);
+}
+
 function isValidOption(value, options, key = "id") {
   return options.some((option) => option[key] === value);
 }
@@ -726,6 +759,8 @@ export default function App() {
 
         // Let React flush the progress state before heavy rendering.
         await new Promise((resolve) => window.requestAnimationFrame(resolve));
+        await waitForNodeImages(pageNode);
+        await new Promise((resolve) => window.requestAnimationFrame(resolve));
 
         const canvas = await html2canvas(pageNode, {
           scale: 4,
@@ -1147,10 +1182,37 @@ function PrintSheetPreview({
   const [isDraggingImage, setIsDraggingImage] = useState(false);
   const [isDropTarget, setIsDropTarget] = useState(false);
   const [imageRatio, setImageRatio] = useState(1);
+  const [viewportSize, setViewportSize] = useState({ width: 1, height: 1 });
   const foldClass =
     layoutName === "vertical-split" || layoutName === "booklet-center"
       ? "sheet-preview__fold sheet-preview__fold--vertical"
       : "sheet-preview__fold sheet-preview__fold--horizontal";
+
+  useEffect(() => {
+    const viewportNode = imageViewportRef.current;
+    if (!viewportNode) {
+      return undefined;
+    }
+
+    const updateViewportSize = () => {
+      const bounds = viewportNode.getBoundingClientRect();
+      setViewportSize({
+        width: Math.max(bounds.width, 1),
+        height: Math.max(bounds.height, 1)
+      });
+    };
+
+    updateViewportSize();
+
+    if (typeof ResizeObserver !== "function") {
+      window.addEventListener("resize", updateViewportSize);
+      return () => window.removeEventListener("resize", updateViewportSize);
+    }
+
+    const observer = new ResizeObserver(() => updateViewportSize());
+    observer.observe(viewportNode);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!month.image?.src) {
@@ -1167,16 +1229,17 @@ function PrintSheetPreview({
     nextImage.src = month.image.src;
   }, [month.image?.src]);
 
-  const viewportRatio =
-    layoutName === "vertical-split" || layoutName === "booklet-center" ? ratio / 2 : ratio;
-  const baseWidth = imageRatio > viewportRatio ? (imageRatio / viewportRatio) * 100 : 100;
-  const baseHeight = imageRatio > viewportRatio ? 100 : (viewportRatio / imageRatio) * 100;
-  const scaledWidth = baseWidth * month.imageTransform.zoom;
-  const scaledHeight = baseHeight * month.imageTransform.zoom;
-  const maxPanX = Math.max(0, (scaledWidth - 100) / 2);
-  const maxPanY = Math.max(0, (scaledHeight - 100) / 2);
-  const imageLeft = 50 - scaledWidth / 2 + month.imageTransform.x * maxPanX;
-  const imageTop = 50 - scaledHeight / 2 + month.imageTransform.y * maxPanY;
+  const viewportRatio = viewportSize.width / viewportSize.height;
+  const baseWidthPx =
+    imageRatio > viewportRatio ? viewportSize.height * imageRatio : viewportSize.width;
+  const baseHeightPx =
+    imageRatio > viewportRatio ? viewportSize.height : viewportSize.width / imageRatio;
+  const renderedWidthPx = baseWidthPx * month.imageTransform.zoom;
+  const renderedHeightPx = baseHeightPx * month.imageTransform.zoom;
+  const maxPanXPx = Math.max(0, (renderedWidthPx - viewportSize.width) / 2);
+  const maxPanYPx = Math.max(0, (renderedHeightPx - viewportSize.height) / 2);
+  const imageLeftPx = (viewportSize.width - renderedWidthPx) / 2 + month.imageTransform.x * maxPanXPx;
+  const imageTopPx = (viewportSize.height - renderedHeightPx) / 2 + month.imageTransform.y * maxPanYPx;
 
   function stopImageDrag(event) {
     if (dragStateRef.current?.pointerId === event.pointerId) {
@@ -1206,8 +1269,8 @@ function PrintSheetPreview({
       startTransform: month.imageTransform,
       viewportWidth: bounds?.width ?? 1,
       viewportHeight: bounds?.height ?? 1,
-      maxPanX,
-      maxPanY
+      maxPanXPx,
+      maxPanYPx
     };
     event.currentTarget.setPointerCapture?.(event.pointerId);
     setIsDraggingImage(true);
@@ -1226,12 +1289,12 @@ function PrintSheetPreview({
       onImageAdjust(month.monthIndex, (current) => ({
         ...current,
         x:
-          dragState.maxPanX > 0
-            ? dragState.startTransform.x + deltaX / ((dragState.maxPanX / 100) * dragState.viewportWidth)
+          dragState.maxPanXPx > 0
+            ? dragState.startTransform.x + deltaX / dragState.maxPanXPx
             : 0,
         y:
-          dragState.maxPanY > 0
-            ? dragState.startTransform.y + deltaY / ((dragState.maxPanY / 100) * dragState.viewportHeight)
+          dragState.maxPanYPx > 0
+            ? dragState.startTransform.y + deltaY / dragState.maxPanYPx
             : 0
       }));
       return;
@@ -1303,10 +1366,10 @@ function PrintSheetPreview({
           <div
             className={isDraggingImage ? "sheet-preview__image-stage is-dragging" : "sheet-preview__image-stage"}
             style={{
-              width: `${scaledWidth}%`,
-              height: `${scaledHeight}%`,
-              left: `${imageLeft}%`,
-              top: `${imageTop}%`
+              width: `${renderedWidthPx}px`,
+              height: `${renderedHeightPx}px`,
+              left: `${imageLeftPx}px`,
+              top: `${imageTopPx}px`
             }}
           >
             <img
