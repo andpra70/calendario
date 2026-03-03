@@ -4,4 +4,4 @@ git add .
 git commit -a -m "update"
 git push
 
-docker-compose up --build --no-cache 
+docker-compose up --build 
