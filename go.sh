@@ -10,5 +10,4 @@ git add .
 git commit -a -m "update"
 git push
 
-./ensure-docker-network.sh
-docker compose --env-file .docker-network.env up --build -d
+docker compose up --build -d

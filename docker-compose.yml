@@ -12,14 +12,6 @@ services:
     environment:
       - CHOKIDAR_USEPOLLING=true
     command: npm run dev -- --host 0.0.0.0 --port 6065
-    networks:
-      - calendario_net
 
 volumes:
   calendario_node_modules:
-
-networks:
-  calendario_net:
-    ipam:
-      config:
-        - subnet: ${CALENDARIO_SUBNET}
