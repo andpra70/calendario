@@ -9,6 +9,8 @@ export default defineConfig({
     port: 6065
   },
    preview: {
+    host: "0.0.0.0",
     allowedHosts: ["zanotti.iliadboxos.it"],
+    port: 6065
   },
 });
