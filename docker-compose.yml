@@ -22,4 +22,4 @@ networks:
   calendario_net:
     ipam:
       config:
-        - subnet: 172.31.250.0/24
+        - subnet: ${CALENDARIO_SUBNET}
