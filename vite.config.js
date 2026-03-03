@@ -6,7 +6,7 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     allowedHosts: ["zanotti.iliadboxos.it"],
-    port: 5173
+    port: 6065
   },
    preview: {
     allowedHosts: ["zanotti.iliadboxos.it"],
