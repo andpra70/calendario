@@ -5,12 +5,12 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: "0.0.0.0",
-    allowedHosts: ["zanotti.iliadboxos.it"],
+    allowedHosts: true,
     port: 6065
   },
-   preview: {
+  preview: {
     host: "0.0.0.0",
-    allowedHosts: ["zanotti.iliadboxos.it"],
+    allowedHosts: true,
     port: 6065
   },
 });
